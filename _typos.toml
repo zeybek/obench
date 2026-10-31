@@ -1,0 +1,5 @@
+# Spelling check settings for typos (https://github.com/crate-ci/typos).
+
+[default.extend-identifiers]
+# scipy's Student's and Welch's t-test.
+ttest_ind = "ttest_ind"

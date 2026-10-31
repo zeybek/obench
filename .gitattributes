@@ -1,0 +1,7 @@
+# LF everywhere, so the shell scripts also run from Git Bash on Windows.
+* text=auto eol=lf
+
+*.odin linguist-language=Odin
+
+# Written by scripts/scipy_reference.py.
+tests/testdata/scipy_reference.json linguist-generated=true

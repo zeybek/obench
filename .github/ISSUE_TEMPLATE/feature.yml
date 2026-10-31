@@ -1,0 +1,16 @@
+name: Feature request
+description: Something obench should measure, report, or make easier.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: What you're trying to measure
+      description: The benchmark you'd like to write and what's missing today.
+    validations:
+      required: true
+  - type: textarea
+    id: shape
+    attributes:
+      label: How it could look
+      description: An API sketch or example output, if you have one.

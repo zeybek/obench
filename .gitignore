@@ -1,0 +1,15 @@
+bin/
+*.o
+*.obj
+*.exe
+*.bin
+*.pdb
+*.dylib
+*.so
+*.dll
+*.spall
+.obench_test_*
+.DS_Store
+
+# Generated documentation
+/build/
