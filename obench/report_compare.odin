@@ -17,6 +17,8 @@ Comparison_Summary :: struct {
 	unchanged:         int,
 	only_in_baseline:  int,
 	only_in_candidate: int,
+	// Benchmarks that worked in the baseline but failed in the candidate.
+	errored:           int,
 	geomean_delta_pct: f64,
 }
 
@@ -42,7 +44,7 @@ write_comparison :: proc(
 	p := _palette(color_output)
 
 	baseline_by_key := make(map[string]Export_Entry, context.temp_allocator)
-	for e in baseline.benchmarks {
+	for &e in baseline.benchmarks {
 		if e.error == "" {
 			baseline_by_key[_match_key(e)] = e
 		}
@@ -82,12 +84,26 @@ write_comparison :: proc(
 	ratio_log_sum: f64 = 0
 	ratio_count := 0
 
-	for e in candidate.benchmarks {
-		if e.error != "" {
-			continue
-		}
+	for &e in candidate.benchmarks {
 		key := _match_key(e)
 		old_e, exists := baseline_by_key[key]
+		if e.error != "" {
+			if exists {
+				seen[key] = true
+				summary.errored += 1
+				table.row(tbl)
+				row := table.last_row(tbl)
+				name :=
+					several_suites ? fmt.tprintf("%s/%s", e.suite_name, e.full_name) : e.full_name
+				_set_cell(tbl, row, 0, name, .Left)
+				_set_cell(tbl, row, 1, format_duration_ns(old_e.p50_ns))
+				_set_cell(tbl, row, 2, "-")
+				_set_cell(tbl, row, 3, fmt.tprintf("%sERROR%s", p.red, p.reset))
+				_set_cell(tbl, row, 4, "-")
+				_set_cell(tbl, row, 5, e.error, .Left)
+			}
+			continue
+		}
 		if !exists {
 			summary.only_in_candidate += 1
 			continue
@@ -191,6 +207,15 @@ write_comparison :: proc(
 		p.reset,
 		summary.unchanged,
 	)
+	if summary.errored > 0 {
+		fmt.wprintf(
+			w,
+			"%s%d benchmark(s) failed in the candidate%s\n",
+			p.red,
+			summary.errored,
+			p.reset,
+		)
+	}
 	if summary.only_in_baseline > 0 || summary.only_in_candidate > 0 {
 		fmt.wprintf(
 			w,
@@ -208,7 +233,9 @@ write_comparison :: proc(
 Compares two saved JSON reports in `benchstat` style and prints the result to stdout
 (see `write_comparison`).
 
-`passed` is `false` only when `fail_on_regression` is set and something regressed.
+`passed` is `false` only when `fail_on_regression` is set and either something regressed or a
+benchmark that worked in the baseline failed in the candidate. Benchmarks missing from one
+side are listed but don't fail the comparison (a candidate run may use a filter).
 */
 @(require_results)
 compare_baseline_files :: proc(
@@ -225,9 +252,10 @@ compare_baseline_files :: proc(
 	candidate := read_json_report(new_path, context.temp_allocator) or_return
 
 	p := _palette(color_output)
-	stdout := os.to_stream(os.stdout)
+	sb := strings.builder_make(context.temp_allocator)
+	out := strings.to_writer(&sb)
 	fmt.wprintf(
-		stdout,
+		out,
 		"\n%sobench compare:%s %s%s vs %s (threshold=%.1f%%)%s\n",
 		p.bold,
 		p.reset,
@@ -237,8 +265,9 @@ compare_baseline_files :: proc(
 		noise_threshold_pct,
 		p.reset,
 	)
-	summary := write_comparison(stdout, baseline, candidate, noise_threshold_pct, color_output)
-	fmt.wprintln(stdout)
+	summary := write_comparison(out, baseline, candidate, noise_threshold_pct, color_output)
+	fmt.wprintln(out)
+	_, _ = os.write_string(os.stdout, strings.to_string(sb))
 
-	return !(fail_on_regression && summary.regressions > 0), nil
+	return !(fail_on_regression && (summary.regressions > 0 || summary.errored > 0)), nil
 }

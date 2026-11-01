@@ -57,7 +57,7 @@ Follow the [Odin naming and style convention](https://github.com/odin-lang/examp
 
 Don't edit `CHANGELOG.md` or the `VERSION` constant by hand. [release-please](https://github.com/googleapis/release-please) writes both from the commit messages on `main` (see below). What you control is the pull request title, which becomes the commit message: a `feat:` or `fix:` shows up in the release notes, and a `!` after the type (`feat!: ...`) marks a breaking change. A change to the JSON report layout is breaking and also needs `REPORT_FORMAT_VERSION` bumped.
 
-If you add an example the CLI discovers, add it to `RUNNER_EXAMPLES` in the `Makefile` and to the check step in `.github/workflows/ci.yml`. Also update the package and benchmark counts in `scripts/smoke.sh`.
+If you add an example the CLI discovers, add it to `RUNNER_EXAMPLES` in the `Makefile` and to the check step in `.github/workflows/ci.yml`. Also update the package and benchmark counts in `scripts/smoke.sh` and the package count that `test_discover_skips_non_benchmark_packages` in `cmd/obench/main_test.odin` expects from the repository root. That test counts every benchmark package below the root, so an untracked scratch package there makes `make test-cli` fail.
 
 Benchmark numbers in documentation must come from a real run, and the text should name the machine they came from.
 

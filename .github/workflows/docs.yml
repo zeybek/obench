@@ -36,7 +36,7 @@ jobs:
           release: latest
 
       - name: Install commonmark
-        run: sudo apt-get install -y libcmark-dev
+        run: sudo apt-get update && sudo apt-get install -y libcmark-dev
 
       - name: Build the docs generator
         run: |

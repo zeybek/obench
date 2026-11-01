@@ -13,7 +13,15 @@ Bench_Error :: enum u8 {
 	No_Measurement,
 	// The `for obench.step(b)` loop was left (`break`/`return`) before the batch finished.
 	Loop_Exited_Early,
+	// More than one measurement (`step` loop, `iter_batched`, `iter_with_large_drop`, or
+	// `run_parallel`) in one benchmark procedure.
+	Measured_Twice,
 }
+
+/*
+Longest `report_metric` unit kept, in bytes. Longer units are cut at a UTF-8 boundary.
+*/
+MAX_METRIC_UNIT_LEN :: 32
 
 /*
 State passed into user benchmark procedures (`proc(b: ^obench.Bencher)`).
@@ -33,6 +41,7 @@ Bencher :: struct {
 	_started_sample:      bool,
 	_finished:            bool,
 	_paused:              bool,
+	_measured_twice:      bool,
 	_sample_start:        Timestamp,
 	_accum_ns:            i64,
 	_accum_cycles:        u64,
@@ -42,9 +51,11 @@ Bencher :: struct {
 	bytes_per_op:         u64,
 	items_per_op:         u64,
 
-	// Custom domain metrics
+	// Custom domain metrics. Units point into `_unit_buf`, so the caller's string may be freed
+	// right after `report_metric`.
 	custom_metrics:       [MAX_CUSTOM_METRICS]Custom_Metric,
 	custom_metrics_count: int,
+	_unit_buf:            [MAX_CUSTOM_METRICS][MAX_METRIC_UNIT_LEN]u8,
 
 	// Zero-allocation assertion
 	expect_zero_alloc:    bool,
@@ -166,18 +177,26 @@ set_items :: proc "contextless" (b: ^Bencher, items_per_op: u64) {
 /*
 Records a custom metric (such as `"hit%"`, `"branches/op"`, or `"simd_lanes"`) that is
 displayed and exported next to the standard statistics. The value from the last sample is
-kept. Up to `MAX_CUSTOM_METRICS` distinct units are stored; `unit` is copied by the suite.
+kept. Up to `MAX_CUSTOM_METRICS` distinct units are stored. `unit` is copied right away (up to
+`MAX_METRIC_UNIT_LEN` bytes), so it may be a temporary string.
 */
 report_metric :: proc "contextless" (b: ^Bencher, value: f64, unit: string) {
+	n := min(len(unit), MAX_METRIC_UNIT_LEN)
+	for n > 0 && n < len(unit) && unit[n] & 0xC0 == 0x80 {
+		n -= 1 // Don't cut a UTF-8 sequence in half.
+	}
+	key := unit[:n]
 	for i in 0 ..< b.custom_metrics_count {
-		if b.custom_metrics[i].unit == unit {
+		if b.custom_metrics[i].unit == key {
 			b.custom_metrics[i].value = value
 			return
 		}
 	}
 	if b.custom_metrics_count < MAX_CUSTOM_METRICS {
-		b.custom_metrics[b.custom_metrics_count] = Custom_Metric {
-			unit  = unit,
+		i := b.custom_metrics_count
+		copy(b._unit_buf[i][:], key)
+		b.custom_metrics[i] = Custom_Metric {
+			unit  = string(b._unit_buf[i][:n]),
 			value = value,
 		}
 		b.custom_metrics_count += 1
@@ -185,13 +204,21 @@ report_metric :: proc "contextless" (b: ^Bencher, value: f64, unit: string) {
 }
 
 /*
-Marks this benchmark as requiring zero heap allocations during the measured loop.
+Marks this benchmark as requiring zero heap allocations during the measured loop. It may be
+called anywhere in the benchmark procedure, also after the loop.
 */
 expect_zero_allocs :: proc "contextless" (b: ^Bencher) {
 	b.expect_zero_alloc = true
-	if b._heap_counter != nil {
-		b._heap_counter.enforce_zero_allocs = true
+}
+
+// Records a second measurement call; the batch is reported as `.Measured_Twice`.
+@(private)
+_reject_second_measurement :: proc "contextless" (b: ^Bencher) -> bool {
+	if b._started_sample {
+		b._measured_twice = true
+		return true
 	}
+	return false
 }
 
 /*

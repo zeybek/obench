@@ -54,7 +54,7 @@ write_markdown_report :: proc(w: io.Writer, s: ^Suite) -> io.Error {
 		table.set_cell_alignment(tbl, table.header_row(tbl), col, .Right)
 	}
 
-	for r in s.results {
+	for &r in s.results {
 		table.row(tbl)
 		row := table.last_row(tbl)
 		_set_cell(tbl, row, 0, fmt.tprintf("`%s`", _md_cell(r.full_name)), .Left)

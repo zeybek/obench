@@ -55,12 +55,14 @@ _Parallel_Shared :: struct {
 	num_threads: int,
 	stride:      int,
 	logger:      runtime.Logger,
+	allocator:   runtime.Allocator, // The benchmark's `context.allocator`
 	ready_bar:   sync.Barrier,
 	_pad0:       [CACHE_LINE_PAD]u8,
 	shared_rem:  int,
 	_pad1:       [CACHE_LINE_PAD]u8,
 	go:          bool,
 	done:        int,
+	spinning:    int, // Workers past the barrier and spinning on `go`
 	_pad2:       [CACHE_LINE_PAD]u8,
 }
 
@@ -98,9 +100,9 @@ _parallel_worker_proc :: proc(t: ^thread.Thread) {
 	b := shared.bencher
 
 	context.logger = shared.logger
-	if b._heap_counter != nil {
-		context.allocator = counting_allocator(b._heap_counter)
-	}
+	// Memory a worker allocates may be freed on the main thread and the other way around, so
+	// every thread uses the benchmark's allocator (the counting allocator while sampling).
+	context.allocator = shared.allocator
 
 	// Each worker counts its own temp allocations (its temp allocator is thread-local)
 	// and adds them to the benchmark's temp counter at the end.
@@ -120,6 +122,7 @@ _parallel_worker_proc :: proc(t: ^thread.Thread) {
 	}
 
 	sync.barrier_wait(&shared.ready_bar)
+	_ = intrinsics.atomic_add_explicit(&shared.spinning, 1, .Release)
 	_wait_for_flag(&shared.go)
 
 	counting_allocator_set_paused(&temp_counter, b._temp_counter == nil)
@@ -132,21 +135,26 @@ _parallel_worker_proc :: proc(t: ^thread.Thread) {
 
 /*
 Executes `body` concurrently on `num_threads` OS threads (default: the group's thread
-count from `@threads(...)`, or 4) that share the benchmark's iteration budget.
+count from `@threads(...)`, or 4 outside such a group) that share the benchmark's iteration
+budget.
 
-Thread creation and teardown happen outside the timed window. All threads wait at a barrier,
-then spin on a start flag that the main thread sets right after starting the clock; the clock
-stops once every thread has finished its share. Heap allocations made by any worker go
-through the benchmark's counting allocator (the backing `context.allocator` must be
-thread-safe), and each worker's temp allocations are counted as well.
+Thread creation and teardown happen outside the timed window. All threads meet at a barrier,
+then spin on a start flag; the main thread starts the clock once every worker is spinning and
+sets the flag, and stops the clock once every thread has finished its share. Heap allocations
+made by any worker go through the benchmark's allocator (the counting allocator while
+sampling, so the backing `context.allocator` must be thread-safe), and each worker's temp
+allocations are counted as well.
 
 The reported time per operation is wall time divided by the total iteration count, so
 perfect scaling halves the per-operation time each time the thread count doubles.
 */
 run_parallel :: proc(b: ^Bencher, body: proc(pb: ^Parallel_Bencher), num_threads := 0) {
+	if _reject_second_measurement(b) {
+		return
+	}
 	threads_to_use := num_threads
 	if threads_to_use <= 0 {
-		threads_to_use = b.threads > 0 ? b.threads : 4
+		threads_to_use = b.threads if b.has_threads else 4
 	}
 
 	total_iters := max(b.remaining_iters, 1)
@@ -198,6 +206,7 @@ run_parallel :: proc(b: ^Bencher, body: proc(pb: ^Parallel_Bencher), num_threads
 		num_threads = threads_to_use,
 		stride      = max(total_iters / (threads_to_use * 32), 1),
 		logger      = context.logger,
+		allocator   = context.allocator,
 		shared_rem  = total_iters,
 	}
 	sync.barrier_init(&shared.ready_bar, threads_to_use)
@@ -224,8 +233,10 @@ run_parallel :: proc(b: ^Bencher, body: proc(pb: ^Parallel_Bencher), num_threads
 		_stride      = shared.stride,
 	}
 
-	// Wait until every worker thread is running.
+	// Wait until every worker is running and spinning on the start flag, so waking a worker from
+	// the barrier isn't timed.
 	sync.barrier_wait(&shared.ready_bar)
+	_wait_for_count(&shared.spinning, threads_to_use - 1)
 
 	_set_counters_paused(b, false)
 	clobber_memory()

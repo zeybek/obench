@@ -5,8 +5,9 @@ name: Release
 # tags the release, creates the GitHub release, and attaches an archive of the library
 # folder and prebuilt CLI archives. See CONTRIBUTING.md.
 #
-# It runs only after CI has passed on a push to main, so a push whose tests failed doesn't
-# update the release PR or make a release.
+# It runs only after CI has passed on a push to main, and only when that push is still the
+# head of main: release-please reads main's current head, so a later push whose CI hasn't
+# finished (or failed) must not be released on the strength of an earlier push's CI run.
 
 on:
   workflow_run:
@@ -27,8 +28,23 @@ jobs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
+      - name: Check that the tested commit is still the head of main
+        id: head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          head_sha="$(gh api "repos/${{ github.repository }}/commits/main" --jq .sha)"
+          if [ "$head_sha" = "$TESTED_SHA" ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "main moved on to $head_sha after CI tested $TESTED_SHA; the newer push's CI run releases it."
+            echo "current=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: googleapis/release-please-action@v5
         id: release
+        if: steps.head.outputs.current == 'true'
         with:
           config-file: .github/release-please-config.json
           manifest-file: .github/.release-please-manifest.json

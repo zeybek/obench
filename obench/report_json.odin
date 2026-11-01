@@ -249,7 +249,7 @@ _export_entry_stats :: proc(e: Export_Entry) -> Stats {
 
 @(private)
 _has_several_suites :: proc(entries: []Export_Entry) -> bool {
-	for e in entries {
+	for &e in entries {
 		if e.suite_name != entries[0].suite_name {
 			return true
 		}
@@ -261,9 +261,9 @@ _has_several_suites :: proc(entries: []Export_Entry) -> bool {
 Loads a saved JSON report into `out_map`, keyed by `full_name`. Keys and each entry's
 `samples_ns` are allocated with `allocator`; `destroy_baseline_map` frees them.
 
-When the file holds several suites (a multi-package CLI run), only the entries of the suite
-named `suite_name` are loaded; a single-suite file is loaded regardless of its suite name.
-Entries recorded with an error are skipped.
+When the file holds several suites (a multi-package CLI run), or `match_suite` is set, only
+the entries of the suite named `suite_name` are loaded; otherwise a single-suite file is
+loaded regardless of its suite name. Entries recorded with an error are skipped.
 */
 @(require_results)
 load_baseline_file :: proc(
@@ -271,9 +271,10 @@ load_baseline_file :: proc(
 	out_map: ^map[string]Stats,
 	allocator: runtime.Allocator,
 	suite_name := "",
+	match_suite := false,
 ) -> Report_Error {
 	doc := read_json_report(path, context.temp_allocator) or_return
-	filter_by_suite := suite_name != "" && _has_several_suites(doc.benchmarks)
+	filter_by_suite := suite_name != "" && (match_suite || _has_several_suites(doc.benchmarks))
 
 	for e in doc.benchmarks {
 		if e.error != "" || (filter_by_suite && e.suite_name != suite_name) {
@@ -306,26 +307,54 @@ destroy_baseline_map :: proc(m: ^map[string]Stats, allocator: runtime.Allocator)
 
 /*
 Combines several JSON reports (for example one per package) into a single report at
-`output_path`. The suite geomean is recomputed over all benchmarks.
+`output_path`. The suite geomean is recomputed over all benchmarks. The build fields
+(`obench_version`, `odin_version`, `optimization`, `os`, `arch`) come from the first report, since the
+reports' runners were built separately from the program that merges them; a part that
+disagrees is reported on stderr.
 */
 @(require_results)
 merge_json_reports :: proc(input_paths: []string, output_path: string) -> Report_Error {
 	entries := make([dynamic]Export_Entry, context.temp_allocator)
 	complexities := make([dynamic]Export_Complexity, context.temp_allocator)
 	suite_names := make([dynamic]string, context.temp_allocator)
+	first: Export_Document
 
-	for path in input_paths {
+	for path, i in input_paths {
 		doc := read_json_report(path, context.temp_allocator) or_return
+		if i == 0 {
+			first = doc
+		} else if doc.odin_version != first.odin_version ||
+		   doc.optimization != first.optimization ||
+		   doc.os != first.os ||
+		   doc.arch != first.arch {
+			fmt.eprintfln(
+				"obench: warning: '%s' was built with Odin %s -o:%s for %s/%s, unlike '%s'",
+				path,
+				doc.odin_version,
+				doc.optimization,
+				doc.os,
+				doc.arch,
+				input_paths[0],
+			)
+		}
 		append(&entries, ..doc.benchmarks)
 		append(&complexities, ..doc.complexities)
 		if !slice.contains(suite_names[:], doc.suite_name) {
 			append(&suite_names, doc.suite_name)
 		}
 	}
+	if len(input_paths) == 0 {
+		first = Export_Document {
+			odin_version = ODIN_VERSION,
+			optimization = fmt.tprintf("%v", ODIN_OPTIMIZATION_MODE),
+			os           = ODIN_OS_STRING,
+			arch         = ODIN_ARCH_STRING,
+		}
+	}
 
 	log_sum: f64 = 0
 	count := 0
-	for e in entries {
+	for &e in entries {
 		if e.error == "" && e.p50_ns > 0 {
 			log_sum += math.ln(e.p50_ns)
 			count += 1
@@ -334,12 +363,12 @@ merge_json_reports :: proc(input_paths: []string, output_path: string) -> Report
 
 	merged := Export_Document {
 		format_version = REPORT_FORMAT_VERSION,
-		obench_version = VERSION,
-		odin_version   = ODIN_VERSION,
-		optimization   = fmt.tprintf("%v", ODIN_OPTIMIZATION_MODE),
+		obench_version = first.obench_version if first.obench_version != "" else VERSION,
+		odin_version   = first.odin_version,
+		optimization   = first.optimization,
 		suite_name     = strings.join(suite_names[:], ", ", context.temp_allocator),
-		os             = ODIN_OS_STRING,
-		arch           = ODIN_ARCH_STRING,
+		os             = first.os,
+		arch           = first.arch,
 		geomean_ns     = count > 0 ? math.exp(log_sum / f64(count)) : 0,
 		benchmarks     = entries[:],
 		complexities   = complexities[:],

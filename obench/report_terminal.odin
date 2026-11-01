@@ -141,6 +141,10 @@ bench_error_message :: proc "contextless" (e: Bench_Error) -> string {
 		return "benchmark never called obench.step, iter_batched, or run_parallel"
 	case .Loop_Exited_Early:
 		return "the `for obench.step(b)` loop was left before the batch finished (break/return)"
+	case .Measured_Twice:
+		return(
+			"the benchmark measured more than once (iter_batched, iter_with_large_drop, or run_parallel after another measurement)" \
+		)
 	}
 	return "unknown error"
 }
@@ -321,6 +325,12 @@ _notes_cell :: proc(s: ^Suite, r: Result, p: _Palette) -> string {
 		}
 	}
 
+	// A sample window within 100 ticks of the clock is quantized by at least 1%.
+	window_ns := r.stats.p50_ns * f64(max(r.stats.batch_size, 1))
+	if s.clock.resolution_ns > 0 && window_ns > 0 && window_ns < 100 * s.clock.resolution_ns {
+		fmt.sbprintf(&sb, "%s[near timer resolution]%s ", p.yellow, p.reset)
+	}
+
 	if r.zero_alloc_failed {
 		fmt.sbprintf(&sb, "%s[FAIL: @zero_alloc]%s", p.red, p.reset)
 	}
@@ -407,7 +417,7 @@ write_terminal_report :: proc(w: io.Writer, s: ^Suite) {
 		table.set_cell_alignment(tbl, table.header_row(tbl), col, .Right)
 	}
 
-	for r, idx in s.results {
+	for &r, idx in s.results {
 		is_last_in_group :=
 			idx + 1 >= len(s.results) || s.results[idx + 1].group_name != r.group_name
 		table.row(tbl)
@@ -461,7 +471,7 @@ write_terminal_report :: proc(w: io.Writer, s: ^Suite) {
 	fmt.wprintf(w, "%s%s%s\n", p.dim, rule, p.reset)
 
 	current_group := ""
-	for r, idx in s.results {
+	for &r, idx in s.results {
 		if r.group_name != current_group {
 			current_group = r.group_name
 			if current_group != "default" {
@@ -589,8 +599,10 @@ _write_summary :: proc(w: io.Writer, s: ^Suite, p: _Palette) {
 }
 
 /*
-Prints the terminal report to stdout. See `write_terminal_report`.
+Prints the terminal report to stdout with a single write. See `write_terminal_report`.
 */
 print_terminal_report :: proc(s: ^Suite) {
-	write_terminal_report(os.to_stream(os.stdout), s)
+	sb := strings.builder_make(context.temp_allocator)
+	write_terminal_report(strings.to_writer(&sb), s)
+	_, _ = os.write_string(os.stdout, strings.to_string(sb))
 }

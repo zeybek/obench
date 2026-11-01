@@ -1,5 +1,6 @@
 package obench
 
+import "base:intrinsics"
 import "base:runtime"
 import "core:fmt"
 import "core:slice"
@@ -29,7 +30,9 @@ _Batch_Result :: struct {
 	bytes_per_op:         u64,
 	items_per_op:         u64,
 	expect_zero:          bool,
-	custom_metrics:       [MAX_CUSTOM_METRICS]Custom_Metric,
+	metric_values:        [MAX_CUSTOM_METRICS]f64,
+	metric_units:         [MAX_CUSTOM_METRICS][MAX_METRIC_UNIT_LEN]u8,
+	metric_unit_lens:     [MAX_CUSTOM_METRICS]int,
 	custom_metrics_count: int,
 	error:                Bench_Error,
 }
@@ -62,7 +65,9 @@ _run_batch :: proc(
 
 	_set_counters_paused(&b, true)
 	if heap_counter != nil {
-		heap_counter.enforce_zero_allocs = b.expect_zero_alloc
+		// Always remember where the first measured allocation happened: `expect_zero_allocs`
+		// may be called after the loop, and the verdict is taken after the run.
+		heap_counter.enforce_zero_allocs = true
 	}
 
 	bench_ctx := context
@@ -83,9 +88,12 @@ _run_batch :: proc(
 	// Leave the counters paused no matter how the procedure returned.
 	_set_counters_paused(&b, true)
 
-	if !b._started_sample {
+	switch {
+	case b._measured_twice:
+		res.error = .Measured_Twice
+	case !b._started_sample:
 		res.error = .No_Measurement
-	} else if !b._finished && b.remaining_iters > 0 {
+	case !b._finished && b.remaining_iters > 0:
 		res.error = .Loop_Exited_Early
 	}
 
@@ -95,8 +103,11 @@ _run_batch :: proc(
 	res.bytes_per_op = b.bytes_per_op
 	res.items_per_op = b.items_per_op
 	res.expect_zero = b.expect_zero_alloc
-	res.custom_metrics = b.custom_metrics
 	res.custom_metrics_count = b.custom_metrics_count
+	for i in 0 ..< b.custom_metrics_count {
+		res.metric_values[i] = b.custom_metrics[i].value
+		res.metric_unit_lens[i] = copy(res.metric_units[i][:], b.custom_metrics[i].unit)
+	}
 	return
 }
 
@@ -196,9 +207,14 @@ _execute_entry :: proc(
 		defer spall_end(spall_rec)
 
 		target_ns := max(i64(cfg.min_sample_time), 50_000)
+		// Untimed setup (`iter_batched`) can make a probe far longer than its timed part.
+		probe_wall_budget := max(i64(cfg.max_bench_time), 20 * target_ns)
+		probe_start := time.tick_now()
 		probe_batch := 1
 		for {
+			batch_start := time.tick_now()
 			br := _run_batch(&info, probe_batch, nil, nil)
+			batch_wall := i64(time.tick_since(batch_start))
 			if cfg.reset_temp_per_iter {
 				runtime.arena_free_all(temp_arena)
 			}
@@ -206,8 +222,14 @@ _execute_entry :: proc(
 				return _fail_entry(s, &result, br.error)
 			}
 			ns := br.ns
-			if ns >= target_ns || probe_batch >= 10_000_000 {
-				if ns > 0 {
+			growth := ns <= 0 ? 10 : clamp(int(target_ns / max(ns, 1)), 2, 16)
+			// Stop before a probe that would run past the budget.
+			out_of_time :=
+				i64(time.tick_since(probe_start)) + batch_wall * i64(growth) > probe_wall_budget
+			if ns >= target_ns || probe_batch >= 10_000_000 || out_of_time {
+				if out_of_time && ns < target_ns {
+					batch_size = probe_batch // Growing it would make every sample as slow.
+				} else if ns > 0 {
 					estimated := int((f64(target_ns) / f64(ns)) * f64(probe_batch))
 					batch_size = clamp(estimated, 1, 10_000_000)
 				} else {
@@ -215,20 +237,17 @@ _execute_entry :: proc(
 				}
 				break
 			}
-			if ns <= 0 {
-				probe_batch *= 10
-			} else {
-				ratio := int(target_ns / max(ns, 1))
-				probe_batch *= clamp(ratio, 2, 16)
-			}
+			probe_batch *= growth
 		}
 	}
 
 	// 3. Sample collection with allocation tracking.
 	sample_target := max(cfg.sample_count, 5)
-	ns_samples := make([dynamic]f64, 0, sample_target, s.allocator)
+	// The time budget usually ends sampling long before a huge `sample_count`.
+	initial_cap := min(sample_target, 1024)
+	ns_samples := make([dynamic]f64, 0, initial_cap, s.allocator)
 	defer delete(ns_samples)
-	cyc_samples := make([dynamic]f64, 0, sample_target, s.allocator)
+	cyc_samples := make([dynamic]f64, 0, initial_cap, s.allocator)
 	defer delete(cyc_samples)
 
 	heap_counter: Counting_Allocator
@@ -241,8 +260,6 @@ _execute_entry :: proc(
 	bytes_per_op: u64 = 0
 	items_per_op: u64 = 0
 
-	// Custom metric units are copied before the arena reset, because a unit string may
-	// have been formatted with `context.temp_allocator` inside the benchmark.
 	last_custom: [MAX_CUSTOM_METRICS]Custom_Metric
 	last_custom_count := 0
 	defer {
@@ -255,6 +272,8 @@ _execute_entry :: proc(
 	batch_arg := fmt.bprintf(arg_buf[:], "batch=%d", batch_size)
 	sampling_start := time.tick_now()
 	for i := 0; i < sample_target; i += 1 {
+		// Peak live bytes are tracked per sample.
+		intrinsics.atomic_store_explicit(&heap_counter.current_bytes, 0, .Relaxed)
 		spall_begin(spall_rec, "sample", batch_arg)
 		br := _run_batch(&info, batch_size, &heap_counter, &temp_counter)
 		spall_end(spall_rec)
@@ -265,9 +284,10 @@ _execute_entry :: proc(
 			}
 			last_custom_count = br.custom_metrics_count
 			for j in 0 ..< last_custom_count {
+				unit := string(br.metric_units[j][:br.metric_unit_lens[j]])
 				last_custom[j] = Custom_Metric {
-					unit  = strings.clone(br.custom_metrics[j].unit, s.allocator),
-					value = br.custom_metrics[j].value,
+					unit  = strings.clone(unit, s.allocator),
+					value = br.metric_values[j],
 				}
 			}
 		}
@@ -355,9 +375,9 @@ _compute_speedups :: proc(results: []Result) {
 	}
 	SPEEDUP_THRESHOLD_PCT :: 3.0
 
-	ref := results[0]
+	ref := &results[0]
 	fastest_ns := max(f64)
-	for r in results {
+	for &r in results {
 		if r.error == .None && r.stats.p50_ns > 0 && r.stats.p50_ns < fastest_ns {
 			fastest_ns = r.stats.p50_ns
 		}
@@ -419,12 +439,14 @@ _suite_execute :: proc(s: ^Suite) -> bool {
 	baseline_map := make(map[string]Stats, allocator = s.allocator)
 	defer destroy_baseline_map(&baseline_map, s.allocator)
 
+	baseline_loaded := false
 	if s.config.baseline_load_path != "" {
 		if err := load_baseline_file(
 			s.config.baseline_load_path,
 			&baseline_map,
 			s.allocator,
 			s.name,
+			s.config.match_baseline_suite,
 		); err != nil {
 			fmt.eprintfln(
 				"obench: could not read baseline '%s' (%v); continuing without comparison",
@@ -432,6 +454,8 @@ _suite_execute :: proc(s: ^Suite) -> bool {
 				err,
 			)
 			s.failed_io += 1
+		} else {
+			baseline_loaded = true
 		}
 	}
 
@@ -463,6 +487,7 @@ _suite_execute :: proc(s: ^Suite) -> bool {
 
 		for p_idx in 0 ..< param_count {
 			param_val := has_params ? g.params[p_idx] : 0
+			param_res_start := len(s.results)
 
 			for t_idx in 0 ..< thread_count {
 				thread_val := has_threads ? g.threads[t_idx] : 1
@@ -500,13 +525,14 @@ _suite_execute :: proc(s: ^Suite) -> bool {
 
 				_compute_speedups(s.results[cohort_start:])
 			}
-		}
 
-		// Thread-scaling group with a single entry: compare every thread count against the first.
-		group_res_end := len(s.results)
-		if has_threads && len(g.entries) == 1 {
-			_compute_speedups(s.results[group_res_start:group_res_end])
+			// Thread-scaling group with a single entry: compare every thread count against the
+			// first one, for the same parameter.
+			if has_threads && len(g.entries) == 1 {
+				_compute_speedups(s.results[param_res_start:])
+			}
 		}
+		group_res_end := len(s.results)
 
 		// Estimate Big-O complexity for each entry of parameterized groups.
 		if has_params && len(g.params) >= 3 && !has_threads {
@@ -514,7 +540,7 @@ _suite_execute :: proc(s: ^Suite) -> bool {
 				e_params := make([dynamic]int, 0, len(g.params), context.temp_allocator)
 				e_times := make([dynamic]f64, 0, len(g.params), context.temp_allocator)
 				for idx in group_res_start ..< group_res_end {
-					r := s.results[idx]
+					r := &s.results[idx]
 					if r.name == entry.name && r.has_param && r.error == .None {
 						append(&e_params, r.param)
 						append(&e_times, r.stats.p50_ns)
@@ -532,7 +558,35 @@ _suite_execute :: proc(s: ^Suite) -> bool {
 
 	spall_end(&spall_rec)
 
+	// A baseline that covers none of this suite's benchmarks compares nothing, so a regression
+	// gate would pass without checking anything (a renamed suite, or the wrong file).
+	if baseline_loaded && len(s.results) > 0 {
+		matched := false
+		for &r in s.results {
+			if r.full_name in baseline_map {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			fmt.eprintfln(
+				"obench: warning: no benchmark of suite '%s' is in baseline '%s'; nothing was compared",
+				s.name,
+				s.config.baseline_load_path,
+			)
+			if s.config.fail_on_regression {
+				s.failed_io += 1
+			}
+		}
+	}
+
 	s.summary = compute_suite_summary(s.results[:])
+
+	// A filter that matches nothing here (a typo, or a benchmark of another suite) must not
+	// replace a saved baseline or report with an empty one.
+	if len(s.results) == 0 && s.config.filter != "" {
+		return suite_failure_count(s) == 0
+	}
 
 	_write_report_file(s, s.config.baseline_save_path, "baseline", save_json_report)
 	_write_report_file(s, s.config.json_export_path, "JSON", save_json_report)

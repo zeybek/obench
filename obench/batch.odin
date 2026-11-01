@@ -47,6 +47,9 @@ iter_batched :: proc(
 	teardown: proc(input: ^T) = nil,
 	mode: Batch_Mode = .Small_Input,
 ) {
+	if _reject_second_measurement(b) {
+		return
+	}
 	total := max(b.remaining_iters, 1)
 	chunk_cap := min(total, _batch_mode_limit(mode))
 
@@ -111,6 +114,9 @@ iter_with_large_drop :: proc(
 	drop: proc(val: ^R),
 	mode: Batch_Mode = .Small_Input,
 ) {
+	if _reject_second_measurement(b) {
+		return
+	}
 	total := max(b.remaining_iters, 1)
 	chunk_cap := min(total, _batch_mode_limit(mode))
 
