@@ -95,6 +95,37 @@ for suite in "dup_bench (a)" "dup_bench (b)"; do
   grep -q "\"suite_name\": \"$suite\"" "$WORK/dup.json" || fail "merged JSON is missing suite '$suite'"
 done
 
+step "a one-suite baseline is not shared by several packages"
+"$OBENCH" "$WORK_N/dup/a" --collection "libs=$ROOT_N" -n 5 -w 2 --no-color --json "$WORK_N/dup_a.json"
+set +e
+"$OBENCH" "$WORK_N/dup" --collection "libs=$ROOT_N" -n 5 -w 2 --no-color \
+  --baseline "$WORK_N/dup_a.json" --fail-on-regression 2> "$WORK/dup_err.txt"; code=$?
+set -e
+[ "$code" -eq 1 ] || fail "expected exit 1 when no suite matches the baseline, got $code"
+grep -q "nothing was compared" "$WORK/dup_err.txt" || fail "expected a 'nothing was compared' warning"
+
+step "a benchmark package that does not parse fails the run"
+mkdir -p "$WORK/parse/good" "$WORK/parse/bad"
+cp "$WORK/dup/a/dup_bench.odin" "$WORK/parse/good/good_bench.odin"
+printf 'package bad_bench\n\nbench_y :: proc(b: ^obench.Bencher {\n' > "$WORK/parse/bad/bad_bench.odin"
+set +e
+"$OBENCH" "$WORK_N/parse" --collection "libs=$ROOT_N" -n 5 -w 2 --no-color >/dev/null 2>&1; code=$?
+set -e
+[ "$code" -eq 1 ] || fail "expected exit 1 when a package does not parse, got $code"
+
+step "a failed run does not promote an old report to --save-baseline"
+mkdir -p "$WORK/stale"
+cp "$WORK/dup/a/dup_bench.odin" "$WORK/stale/stale_bench.odin"
+"$OBENCH" "$WORK_N/stale" --collection "libs=$ROOT_N" -n 5 -w 2 --no-color --json "$WORK_N/stale_a.json"
+printf 'package dup_bench\n\nimport obench "libs:obench"\n\nbench_x :: proc(b: ^obench.Bencher) { not_declared() }\n' \
+  > "$WORK/stale/stale_bench.odin"
+set +e
+"$OBENCH" "$WORK_N/stale" --collection "libs=$ROOT_N" -n 5 -w 2 --no-color \
+  --json "$WORK_N/stale_a.json" --save-baseline "$WORK_N/stale_b.json" >/dev/null 2>&1; code=$?
+set -e
+[ "$code" -eq 1 ] || fail "expected exit 1 for a build failure, got $code"
+[ ! -e "$WORK/stale_b.json" ] || fail "the old --json report was copied to --save-baseline"
+
 step "nothing was written into the source tree"
 AFTER="$(snapshot)"
 [ "$BEFORE" = "$AFTER" ] || fail "files under examples/ changed: $(diff <(echo "$BEFORE") <(echo "$AFTER") || true)"

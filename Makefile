@@ -10,7 +10,8 @@ FLAGS := -vet -vet-tabs -vet-style -vet-cast -strict-style -warnings-as-errors -
 TEST_FLAGS ?= -sanitize:address -define:ODIN_TEST_FANCY=false
 BIN_DIR := bin
 OBENCH_BIN := $(BIN_DIR)/obench
-# Example packages without a main procedure (driven by the CLI's generated runner).
+# Example packages without a main procedure, checked with -no-entry-point. All but
+# core_style (which runs inside `odin test`) are driven by the CLI's generated runner.
 RUNNER_EXAMPLES := allocators aos_vs_soa parallel sorting core_style
 
 all: check check-barriers test build smoke

@@ -26,7 +26,7 @@ Complexity_Estimate :: struct {
 	coefficient: f64, // Scaling factor `c` in `T(N) ≈ a + c * f(N)` (in nanoseconds); the mean time for O(1)
 	intercept:   f64, // Fixed cost `a` in `T(N) ≈ a + c * f(N)` (in nanoseconds); 0 for O(1)
 	nrmse:       f64, // Normalized Root Mean Square Error (lower is better; 0.0 = exact fit)
-	r_squared:   f64, // Coefficient of determination R^2 in [0.0, 1.0]
+	r_squared:   f64, // R^2 in [0.0, 1.0] of the fitted curve; for O(1), 1 - NRMSE^2 (how flat the times are)
 }
 
 /*

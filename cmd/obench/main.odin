@@ -75,6 +75,7 @@ Discovered_Package :: struct {
 	has_bench_file: bool, // contains a `*_bench.odin` file
 	lib_import:     string, // obench import path as written (without quotes); "" if unknown
 	benches:        [dynamic]Discovered_Bench,
+	warnings:       [dynamic]string, // Annotations that no benchmark reads
 }
 
 print_usage :: proc() {
@@ -89,27 +90,30 @@ USAGE:
   obench version | help
 
 DISCOVERY:
-  Every package under dir (searched recursively, hidden directories skipped) that defines
-  'bench_<name> :: proc(b: ^obench.Bencher)' procedures is built into a temporary runner.
-  Packages with their own main() run as-is if they define benchmarks or a *_bench.odin file.
-  Nothing is written into your source directories.
+  Every package under dir (searched recursively, hidden directories and symlinks skipped)
+  that defines 'bench_<name> :: proc(b: ^obench.Bencher)' procedures is built into a
+  temporary runner. Files for other platforms (_windows.odin, #+build linux) and #+ignore
+  files are left out, as the compiler does. Packages with their own main() run as-is if they
+  define benchmarks or a *_bench.odin file. Nothing is written into your source directories.
 
   bench_<group>__<name>          Group related benchmarks (shared params, speedup column)
   // @group(name)                Set the group explicitly
   // @params(8, 64, 512)         Run the group once per parameter; >= 3 enables Big-O fitting
   // @threads(1, 2, 4)           Run the group once per thread count (use run_parallel)
   // @zero_alloc                 Fail if the measured loop allocates on the heap
-  Annotations go on comment lines of their own; several may share a line.
+  Annotations go on comment lines of their own, directly above the procedure (no blank
+  line); several may share a line.
 
 RUN OPTIONS:
   -f, --filter <substring>       Run only benchmarks whose full name contains the substring
   -n, --samples <count>          Samples per benchmark (default: 50)
   -w, --warmup <ms>              Warmup per benchmark in milliseconds (default: 40)
       --zero-alloc               Treat every benchmark as @zero_alloc
-      --baseline <file.json>     Compare against a saved report
+      --baseline <file.json>     Compare against a saved report (each package with its own suite)
       --save-baseline <file>     Save results as a JSON report (alias of --json)
       --threshold <pct>          Minimum median change counted as significant (default: 2.0)
-      --fail-on-regression       Exit with status 1 if a benchmark regressed significantly
+      --fail-on-regression       Exit with status 1 if a benchmark regressed significantly,
+                                 or the baseline holds none of a suite's benchmarks
       --json <file>              Write a JSON report
       --md <file>                Write a GitHub Markdown report
       --csv <file>               Write an RFC 4180 CSV report
@@ -125,7 +129,8 @@ BUILD OPTIONS (forwarded to the Odin compiler):
       --define <KEY=VAL>         -define:<KEY>=<VAL> (repeatable)
 
 The compiler is taken from $ODIN when set, otherwise 'odin' on PATH.
-Exit status: 0 success, 1 benchmark/regression/build failure, 2 usage error.
+Exit status: 0 success, 1 benchmark/regression/build failure or an unparsable *_bench.odin
+package, 2 usage error (also a short flag together with its long form, like -n and --samples).
 `,
 		obench.VERSION,
 	)
@@ -234,7 +239,18 @@ parse_cli_args :: proc(
 		return opts, fmt.tprintf("could not open '%s'", e.filename)
 	}
 
-	// Merge the short aliases.
+	// Merge the short aliases. core:flags doesn't keep the order of the arguments, so a short
+	// alias and its long form together are ambiguous.
+	switch {
+	case f.f != "" && f.filter != "":
+		return opts, "give either -f or --filter, not both"
+	case f.n != UNSET && f.samples != UNSET:
+		return opts, "give either -n or --samples, not both"
+	case f.w != UNSET && f.warmup != UNSET:
+		return opts, "give either -w or --warmup, not both"
+	case f.o != "" && f.opt != "":
+		return opts, "give either -o or --opt, not both"
+	}
 	if f.f != "" {
 		f.filter = f.f
 	}
@@ -358,7 +374,8 @@ _parse_int_list :: proc(
 		)
 		return
 	}
-	for part in strings.split(args, ",", context.temp_allocator) {
+	rest := args
+	for part in strings.split_iterator(&rest, ",") {
 		text := strings.trim_space(part)
 		v, ok := strconv.parse_int(text)
 		switch {
@@ -534,6 +551,58 @@ parse_doc_annotations :: proc(
 }
 
 /*
+Appends a warning for every obench annotation line (`@group`, `@params`, `@threads`,
+`@zero_alloc`) in a comment group of `file` that is no declaration's doc comment. Such a
+comment usually sits above a benchmark with a blank line in between, so obench never sees it.
+*/
+@(private)
+detached_annotation_warnings :: proc(
+	file: ^ast.File,
+	out: ^[dynamic]string,
+	allocator := context.allocator,
+) {
+	attached := make(map[^ast.Comment_Group]bool, context.temp_allocator)
+	if file.docs != nil {
+		attached[file.docs] = true
+	}
+	for decl in file.decls {
+		if vd, ok := decl.derived.(^ast.Value_Decl); ok && vd.docs != nil {
+			attached[vd.docs] = true
+		}
+	}
+	for group in file.comments {
+		if group in attached {
+			continue
+		}
+		for tok in group.list {
+			if !strings.has_prefix(tok.text, "//") {
+				continue
+			}
+			text := strings.trim_space(tok.text[2:])
+			for name in ([?]string{"@zero_alloc", "@group", "@params", "@threads"}) {
+				if !strings.has_prefix(text, name) {
+					continue
+				}
+				next := len(name) < len(text) ? text[len(name)] : ' '
+				if next == ' ' || next == '\t' || next == '(' {
+					append(
+						out,
+						fmt.aprintf(
+							"%s(%d): '%s' is not attached to a benchmark and is ignored (remove the blank line between the comment and the procedure)",
+							tok.pos.file,
+							tok.pos.line,
+							name,
+							allocator = allocator,
+						),
+					)
+					break
+				}
+			}
+		}
+	}
+}
+
+/*
 Reports whether `lit` has the benchmark signature `proc(b: ^Bencher)` or
 `proc(b: ^pkg.Bencher)`. On success `pkg_alias` is the package qualifier ("" if none).
 */
@@ -617,6 +686,100 @@ Discover_Status :: enum {
 	Obench_Library, // The obench library itself (declares `Bencher :: struct`).
 }
 
+/*
+Reports whether the compiler leaves out the file `name` when building for this OS and
+architecture: `.`-prefixed files and `_<os>`, `_<arch>`, `_<os>_<arch>` suffixes.
+*/
+@(private)
+excluded_by_file_name :: proc(name: string) -> bool {
+	if strings.has_prefix(name, ".") {
+		return true
+	}
+	stem := strings.trim_suffix(name, ".odin")
+	last_us := strings.last_index_byte(stem, '_')
+	if last_us < 0 {
+		return false
+	}
+	last := stem[last_us + 1:]
+	rest := stem[:last_us]
+	second := rest[strings.last_index_byte(rest, '_') + 1:] // `windows` in `windows_amd64`
+
+	os1, _ := parser.get_build_os_from_string(last)
+	arch1 := parser.get_build_arch_from_string(last)
+	os2, _ := parser.get_build_os_from_string(second)
+	arch2 := parser.get_build_arch_from_string(second)
+	switch {
+	case os1 != .Unknown && arch2 != .Unknown:
+		return os1 != ODIN_OS || arch2 != ODIN_ARCH
+	case os2 != .Unknown && arch1 != .Unknown:
+		return os2 != ODIN_OS || arch1 != ODIN_ARCH
+	case os1 != .Unknown:
+		return os1 != ODIN_OS
+	case arch1 != .Unknown:
+		return arch1 != ODIN_ARCH
+	}
+	return false
+}
+
+/*
+Parses the `.odin` files of the package in `dir` that the compiler would build for this OS
+and architecture (file-name suffixes and `#+build` / `#+ignore` tags). `ok` is false when an
+included file has a syntax error. Lists the directory instead of using a glob, so paths with
+`[` or `]` work.
+*/
+@(private = "file")
+_parse_target_package :: proc(dir: string, p: ^parser.Parser) -> (pkg: ^ast.Package, ok: bool) {
+	NO_POS :: tokenizer.Pos{}
+
+	entries, dir_err := os.read_all_directory_by_path(dir, context.allocator)
+	if dir_err != nil {
+		return nil, false
+	}
+	names := make([dynamic]string, 0, len(entries))
+	for fi in entries {
+		if fi.type == .Regular &&
+		   strings.has_suffix(fi.name, ".odin") &&
+		   !excluded_by_file_name(fi.name) {
+			append(&names, fi.name)
+		}
+	}
+	slice.sort(names[:])
+
+	pkg = ast.new(ast.Package, NO_POS, NO_POS)
+	pkg.fullpath = dir
+	ok = true
+	target := parser.Build_Target {
+		os   = ODIN_OS,
+		arch = ODIN_ARCH,
+	}
+	for name in names {
+		fullpath, _ := filepath.join({dir, name})
+		src, src_err := os.read_entire_file(fullpath, context.allocator)
+		if src_err != nil {
+			return pkg, false
+		}
+		if strings.trim_space(string(src)) == "" {
+			continue
+		}
+		file := ast.new(ast.File, NO_POS, NO_POS)
+		file.pkg = pkg
+		file.src = string(src)
+		file.fullpath = fullpath
+		parsed := parser.parse_file(p, file)
+		if !parser.match_build_tags(parser.parse_file_tags(file^), target) {
+			continue
+		}
+		if !parsed {
+			ok = false
+		}
+		if pkg.name == "" && file.pkg_decl != nil {
+			pkg.name = file.pkg_decl.name
+		}
+		pkg.files[fullpath] = file
+	}
+	return pkg, ok
+}
+
 @(private = "file")
 _dir_has_bench_file :: proc(dir: string) -> bool {
 	entries, err := os.read_all_directory_by_path(dir, context.temp_allocator)
@@ -660,7 +823,7 @@ discover_package :: proc(
 	parsed_ok: bool
 	{
 		context.allocator = runtime.arena_allocator(&parse_arena)
-		pkg, parsed_ok = parser.parse_package_from_path(abs_dir, &p)
+		pkg, parsed_ok = _parse_target_package(abs_dir, &p)
 	}
 	if !parsed_ok || pkg == nil || len(pkg.files) == 0 {
 		has_bench_file := _dir_has_bench_file(abs_dir)
@@ -671,6 +834,7 @@ discover_package :: proc(
 	res.dir_path = abs_dir
 	res.pkg_name = strings.clone(pkg.name, allocator)
 	res.benches = make([dynamic]Discovered_Bench, allocator)
+	res.warnings = make([dynamic]string, allocator)
 
 	file_paths := make([dynamic]string, 0, len(pkg.files), context.temp_allocator)
 	for k in pkg.files {
@@ -694,6 +858,7 @@ discover_package :: proc(
 		if strings.has_suffix(base_name, "_bench.odin") {
 			res.has_bench_file = true
 		}
+		detached_annotation_warnings(file, &res.warnings, allocator)
 
 		file_private := false
 		for tag in file.tags {
@@ -799,6 +964,13 @@ discover_package :: proc(
 		destroy_discovered_package(&res, allocator)
 		return {}, skip_status
 	}
+	if res.has_main {
+		// Its own main registers the benchmarks; doc comments mean nothing to it.
+		for msg in res.warnings {
+			delete(msg, allocator)
+		}
+		clear(&res.warnings)
+	}
 	return res, .Benchmark_Package
 }
 
@@ -806,7 +978,7 @@ destroy_discovered_package :: proc(pkg: ^Discovered_Package, allocator := contex
 	delete(pkg.dir_path, allocator)
 	delete(pkg.pkg_name, allocator)
 	delete(pkg.lib_import, allocator)
-	for b in pkg.benches {
+	for &b in pkg.benches {
 		delete(b.proc_name, allocator)
 		delete(b.group_name, allocator)
 		delete(b.bench_name, allocator)
@@ -823,6 +995,10 @@ destroy_discovered_package :: proc(pkg: ^Discovered_Package, allocator := contex
 		delete(b.warnings)
 	}
 	delete(pkg.benches)
+	for msg in pkg.warnings {
+		delete(msg, allocator)
+	}
+	delete(pkg.warnings)
 	pkg^ = {}
 }
 
@@ -847,6 +1023,7 @@ _discover_recursive :: proc(
 	dir: string,
 	is_root: bool,
 	out: ^[dynamic]Discovered_Package,
+	unparsed: ^int,
 	allocator := context.allocator,
 ) {
 	// A copy of the obench repository inside a project: its examples and tests are not the
@@ -860,8 +1037,9 @@ _discover_recursive :: proc(
 	case .Benchmark_Package:
 		append(out, pkg)
 	case .Parse_Error:
+		unparsed^ += 1
 		fmt.eprintfln(
-			"obench: warning: skipping '%s': it has *_bench.odin files but could not be parsed (run 'odin check %s')",
+			"obench: error: '%s' has *_bench.odin files but could not be parsed (run 'odin check %s')",
 			dir,
 			dir,
 		)
@@ -887,22 +1065,27 @@ _discover_recursive :: proc(
 	}
 	slice.sort(sub_paths[:])
 	for sub in sub_paths {
-		_discover_recursive(sub, false, out, allocator)
+		_discover_recursive(sub, false, out, unparsed, allocator)
 	}
 }
 
 /*
-Discovers every benchmark package in `root_path` and its subdirectories. Hidden directories
-are skipped, and so are copies of the obench library or repository below `root_path` (their
-examples and tests are not the user's benchmarks).
+Discovers every benchmark package in `root_path` and its subdirectories. Hidden and
+symlinked directories are skipped (so a link can't make the walk loop), and so are copies of
+the obench library or repository below `root_path` (their examples and tests are not the
+user's benchmarks). `unparsed` counts directories whose `*_bench.odin` files could not be
+parsed; each one is reported on stderr.
 */
 discover_all_packages :: proc(
 	root_path: string,
 	allocator := context.allocator,
-) -> [dynamic]Discovered_Package {
-	packages := make([dynamic]Discovered_Package, allocator)
-	_discover_recursive(root_path, true, &packages, allocator)
-	return packages
+) -> (
+	packages: [dynamic]Discovered_Package,
+	unparsed: int,
+) {
+	packages = make([dynamic]Discovered_Package, allocator)
+	_discover_recursive(root_path, true, &packages, &unparsed, allocator)
+	return
 }
 
 /*
@@ -924,7 +1107,7 @@ check_package :: proc(pkg: Discovered_Package, allocator := context.temp_allocat
 			),
 		)
 	}
-	for b in pkg.benches {
+	for &b in pkg.benches {
 		for msg in b.problems {
 			append(&problems, msg)
 		}
@@ -1006,10 +1189,10 @@ suite_names :: proc(
 ) -> []string {
 	names := make([]string, len(packages), allocator)
 	abs_root, root_err := os.get_absolute_path(root, context.temp_allocator)
-	for pkg, i in packages {
+	for &pkg, i in packages {
 		names[i] = pkg.pkg_name
 		shared := 0
-		for other in packages {
+		for &other in packages {
 			if other.pkg_name == pkg.pkg_name {
 				shared += 1
 			}
@@ -1054,7 +1237,7 @@ generate_runner_source :: proc(
 	strings.write_string(&sb, "\tdefer obench.suite_destroy(&s)\n\n")
 
 	groups := make([dynamic]string, context.temp_allocator)
-	for b in pkg.benches {
+	for &b in pkg.benches {
 		if !slice.contains(groups[:], b.group_name) {
 			append(&groups, b.group_name)
 		}
@@ -1067,7 +1250,7 @@ generate_runner_source :: proc(
 		params: []int
 		threads_from := ""
 		threads: []int
-		for b in pkg.benches {
+		for &b in pkg.benches {
 			if b.group_name != g_name {
 				continue
 			}
@@ -1120,7 +1303,7 @@ generate_runner_source :: proc(
 			_write_ints(&sb, threads)
 			strings.write_string(&sb, "})\n")
 		}
-		for b in pkg.benches {
+		for &b in pkg.benches {
 			if b.group_name == g_name {
 				fmt.sbprintf(
 					&sb,
@@ -1139,13 +1322,15 @@ generate_runner_source :: proc(
 	return strings.to_string(sb)
 }
 
-// Export paths for one package run. With several packages, each package writes to its own
-// file in the work directory and the CLI merges them afterwards.
+// Export paths and baseline matching for one package run. With several packages, each
+// package writes to its own file in the work directory and the CLI merges them afterwards.
 Package_Outputs :: struct {
-	json:  string,
-	md:    string,
-	csv:   string,
-	spall: string,
+	json:                 string,
+	baseline:             string, // `--save-baseline` when it differs from `json`
+	md:                   string,
+	csv:                  string,
+	spall:                string,
+	match_baseline_suite: bool,
 }
 
 @(private = "file")
@@ -1179,9 +1364,15 @@ _runtime_args :: proc(
 	}
 	if opts.load_baseline != "" {
 		append(&args, "--baseline", opts.load_baseline)
+		if outputs.match_baseline_suite {
+			append(&args, "--match-baseline-suite")
+		}
 	}
 	if outputs.json != "" {
 		append(&args, "--json", outputs.json)
+	}
+	if outputs.baseline != "" {
+		append(&args, "--save-baseline", outputs.baseline)
 	}
 	if outputs.md != "" {
 		append(&args, "--md", outputs.md)
@@ -1403,6 +1594,8 @@ run_all :: proc(packages: []Discovered_Package, opts: CLI_Options) -> bool {
 	defer os.remove_all(work_dir)
 
 	json_target := opts.json_path != "" ? opts.json_path : opts.save_baseline
+	// --save-baseline and --json may name two different files.
+	extra_baseline := opts.save_baseline != json_target ? opts.save_baseline : ""
 	multi := len(packages) > 1
 
 	json_parts := make([dynamic]string, context.temp_allocator)
@@ -1413,19 +1606,26 @@ run_all :: proc(packages: []Discovered_Package, opts: CLI_Options) -> bool {
 	names := suite_names(packages, opts.target_path)
 
 	all_ok := true
-	for pkg, idx in packages {
+	for &pkg, idx in packages {
+		for w in pkg.warnings {
+			fmt.eprintfln("obench: warning: %s", w)
+		}
 		for b in pkg.benches {
 			for w in b.warnings {
 				fmt.eprintfln("obench: warning: %s", w)
 			}
 		}
 		outputs := Package_Outputs {
-			json  = json_target,
-			md    = opts.md_path,
-			csv   = opts.csv_path,
-			spall = opts.spall_path,
+			json                 = json_target,
+			baseline             = extra_baseline,
+			md                   = opts.md_path,
+			csv                  = opts.csv_path,
+			spall                = opts.spall_path,
+			// Two packages must not compare with each other's numbers in a one-suite baseline.
+			match_baseline_suite = multi,
 		}
 		if multi {
+			outputs.baseline = "" // Merged from the JSON parts below.
 			if outputs.json != "" {
 				outputs.json = _part_path(work_dir, idx, ".json")
 			}
@@ -1477,30 +1677,25 @@ run_all :: proc(packages: []Discovered_Package, opts: CLI_Options) -> bool {
 			json_ok = false
 		} else {
 			json_ok = _write_merged(json_target, json_parts[:], "JSON", obench.merge_json_reports)
+			if json_ok && extra_baseline != "" {
+				json_ok = _write_merged(
+					extra_baseline,
+					json_parts[:],
+					"baseline",
+					obench.merge_json_reports,
+				)
+			}
 		}
 		all_ok &= json_ok
 		all_ok &= _write_merged(opts.md_path, md_parts[:], "Markdown", _merge_markdown)
 		all_ok &= _write_merged(opts.csv_path, csv_parts[:], "CSV", _merge_csv)
 	}
-	// --save-baseline and --json may name two different files.
-	if json_ok &&
-	   opts.json_path != "" &&
-	   opts.save_baseline != "" &&
-	   opts.json_path != opts.save_baseline &&
-	   os.exists(opts.json_path) {
-		data, err := os.read_entire_file(opts.json_path, context.temp_allocator)
-		if err != nil || os.write_entire_file(opts.save_baseline, data) != nil {
-			fmt.eprintfln("obench: could not write baseline '%s'", opts.save_baseline)
-			all_ok = false
-		}
-	}
-
 	return all_ok
 }
 
 list_packages :: proc(packages: []Discovered_Package) {
 	cwd, _ := os.get_working_directory(context.temp_allocator)
-	for pkg in packages {
+	for &pkg in packages {
 		shown, rel_err := filepath.rel(cwd, pkg.dir_path, context.temp_allocator)
 		if rel_err != nil {
 			shown = pkg.dir_path
@@ -1530,6 +1725,9 @@ list_packages :: proc(packages: []Discovered_Package) {
 		}
 		for problem in check_package(pkg) {
 			fmt.printf("  ! %s\n", problem)
+		}
+		for w in pkg.warnings {
+			fmt.printf("  warning: %s\n", w)
 		}
 		for b in pkg.benches {
 			for w in b.warnings {
@@ -1593,7 +1791,7 @@ main :: proc() {
 		os.exit(EXIT_USAGE)
 	}
 
-	packages := discover_all_packages(opts.target_path)
+	packages, unparsed := discover_all_packages(opts.target_path)
 	defer {
 		for &pkg in packages {
 			destroy_discovered_package(&pkg)
@@ -1602,19 +1800,22 @@ main :: proc() {
 	}
 
 	if len(packages) == 0 {
-		fmt.eprintfln("obench: no benchmark packages found under '%s'", opts.target_path)
-		fmt.eprintln(
-			"A benchmark package defines 'bench_<name> :: proc(b: ^obench.Bencher)' procedures.",
-		)
+		if unparsed == 0 {
+			fmt.eprintfln("obench: no benchmark packages found under '%s'", opts.target_path)
+			fmt.eprintln(
+				"A benchmark package defines 'bench_<name> :: proc(b: ^obench.Bencher)' procedures.",
+			)
+		}
 		os.exit(EXIT_FAILURE)
 	}
 
 	if opts.subcommand == .List {
 		list_packages(packages[:])
-		return
+	} else if !run_all(packages[:], opts) {
+		os.exit(EXIT_FAILURE)
 	}
-
-	if !run_all(packages[:], opts) {
+	// The other packages ran, but a benchmark package that doesn't parse must not pass a gate.
+	if unparsed > 0 {
 		os.exit(EXIT_FAILURE)
 	}
 }

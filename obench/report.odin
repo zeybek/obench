@@ -26,6 +26,8 @@ bench_error_string :: proc "contextless" (e: Bench_Error) -> string {
 		return "no_measurement"
 	case .Loop_Exited_Early:
 		return "loop_exited_early"
+	case .Measured_Twice:
+		return "measured_twice"
 	}
 	return "unknown"
 }

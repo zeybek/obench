@@ -52,6 +52,10 @@ test_parse_cli_args_rejects_bad_input :: proc(t: ^testing.T) {
 		{"--collection", "missing_equals"},
 		{"compare", "only_one.json"},
 		{"run", "a", "b"},
+		{"-n", "5", "--samples", "100"},
+		{"-f", "a", "--filter", "b"},
+		{"-w", "1", "--warmup", "2"},
+		{"-o", "none", "--opt", "speed"},
 	}
 	for args in bad_inputs {
 		opts, err := parse_cli_args(args)
@@ -118,7 +122,7 @@ test_discover_skips_non_benchmark_packages :: proc(t: ^testing.T) {
 	defer destroy_discovered_package(&cli)
 	testing.expect_value(t, cli_status, Discover_Status.Not_Benchmark)
 
-	packages := discover_all_packages(".")
+	packages, _ := discover_all_packages(".")
 	defer {
 		for &p in packages {
 			destroy_discovered_package(&p)
@@ -251,7 +255,7 @@ test_duplicate_package_names_get_distinct_suites :: proc(t: ^testing.T) {
 		"package solo_bench\n\nimport obench \"../obench\"\n\nbench_y :: proc(b: ^obench.Bencher) {}\n",
 	)
 
-	packages := discover_all_packages(root)
+	packages, _ := discover_all_packages(root)
 	defer {
 		for &p in packages {
 			destroy_discovered_package(&p)
@@ -282,6 +286,188 @@ test_discover_reports_parse_errors :: proc(t: ^testing.T) {
 	pkg, status := discover_package(dir)
 	defer destroy_discovered_package(&pkg)
 	testing.expect_value(t, status, Discover_Status.Parse_Error)
+}
+
+@(test)
+test_unparsed_packages_are_counted :: proc(t: ^testing.T) {
+	root, err := os.make_directory_temp("", "obench-test-*", context.temp_allocator)
+	if !testing.expect_value(t, err, nil) {
+		return
+	}
+	defer os.remove_all(root)
+	_write_test_file(
+		t,
+		root,
+		"good",
+		"good_bench.odin",
+		"package good_bench\n\nimport obench \"../obench\"\n\nbench_x :: proc(b: ^obench.Bencher) {}\n",
+	)
+	_write_test_file(
+		t,
+		root,
+		"bad",
+		"bad_bench.odin",
+		"package bad_bench\n\nbench_y :: proc(b: ^obench.Bencher {\n",
+	)
+
+	packages, unparsed := discover_all_packages(root)
+	defer {
+		for &p in packages {
+			destroy_discovered_package(&p)
+		}
+		delete(packages)
+	}
+	testing.expect_value(t, len(packages), 1)
+	testing.expect_value(t, unparsed, 1)
+}
+
+// An OS other than the one the tests run on.
+@(private = "file")
+_other_os :: proc() -> string {
+	return "linux" if ODIN_OS == .Darwin else "darwin"
+}
+
+@(test)
+test_file_name_suffixes_follow_the_compiler :: proc(t: ^testing.T) {
+	this_os := strings.to_lower(ODIN_OS_STRING, context.temp_allocator)
+	this_arch := ODIN_ARCH_STRING
+	other_arch := "amd64" if ODIN_ARCH == .arm64 else "arm64"
+	Case :: struct {
+		name:     string,
+		excluded: bool,
+	}
+	cases := []Case {
+		{"plain.odin", false},
+		{"my_bench.odin", false},
+		{".hidden.odin", true},
+		{fmt.tprintf("x_%s.odin", _other_os()), true},
+		{fmt.tprintf("x_%s.odin", this_os), false},
+		{fmt.tprintf("x_%s.odin", other_arch), true},
+		{fmt.tprintf("x_%s.odin", this_arch), false},
+		{fmt.tprintf("x_%s_%s.odin", this_os, this_arch), false},
+		{fmt.tprintf("x_%s_%s.odin", this_os, other_arch), true},
+		{fmt.tprintf("x_%s_%s.odin", _other_os(), this_arch), true},
+		{fmt.tprintf("%s_%s.odin", this_os, this_arch), false},
+	}
+	for c in cases {
+		testing.expectf(
+			t,
+			excluded_by_file_name(c.name) == c.excluded,
+			"%s: expected excluded=%v",
+			c.name,
+			c.excluded,
+		)
+	}
+}
+
+@(test)
+test_discover_honors_build_constraints :: proc(t: ^testing.T) {
+	root, err := os.make_directory_temp("", "obench-test-*", context.temp_allocator)
+	if !testing.expect_value(t, err, nil) {
+		return
+	}
+	defer os.remove_all(root)
+	header := "package tags_bench\n\nimport obench \"../obench\"\n\n"
+	_write_test_file(
+		t,
+		root,
+		"pkg",
+		"a_bench.odin",
+		fmt.tprintf("%sbench_here :: proc(b: ^obench.Bencher) {{}}\n", header),
+	)
+	_write_test_file(
+		t,
+		root,
+		"pkg",
+		fmt.tprintf("b_%s.odin", _other_os()),
+		fmt.tprintf("%sbench_other_os :: proc(b: ^obench.Bencher) {{}}\n", header),
+	)
+	_write_test_file(
+		t,
+		root,
+		"pkg",
+		"c_tagged.odin",
+		fmt.tprintf(
+			"#+build %s\n%sbench_tagged :: proc(b: ^obench.Bencher) {{}}\n",
+			_other_os(),
+			header,
+		),
+	)
+	_write_test_file(
+		t,
+		root,
+		"pkg",
+		"d_ignored.odin",
+		"#+build ignore\npackage tags_bench\n\nmain :: proc() {}\n",
+	)
+
+	dir, _ := filepath.join({root, "pkg"}, context.temp_allocator)
+	pkg, status := discover_package(dir)
+	defer destroy_discovered_package(&pkg)
+	if !testing.expect_value(t, status, Discover_Status.Benchmark_Package) {
+		return
+	}
+	testing.expect_value(t, pkg.has_main, false)
+	testing.expect_value(t, len(pkg.benches), 1)
+	if len(pkg.benches) == 1 {
+		testing.expect_value(t, pkg.benches[0].proc_name, "bench_here")
+	}
+}
+
+@(test)
+test_discover_handles_brackets_in_paths :: proc(t: ^testing.T) {
+	root, err := os.make_directory_temp("", "obench-test-*", context.temp_allocator)
+	if !testing.expect_value(t, err, nil) {
+		return
+	}
+	defer os.remove_all(root)
+	_write_test_file(
+		t,
+		root,
+		"br [x]",
+		"br_bench.odin",
+		"package br_bench\n\nimport obench \"../obench\"\n\nbench_x :: proc(b: ^obench.Bencher) {}\n",
+	)
+	dir, _ := filepath.join({root, "br [x]"}, context.temp_allocator)
+	pkg, status := discover_package(dir)
+	defer destroy_discovered_package(&pkg)
+	testing.expect_value(t, status, Discover_Status.Benchmark_Package)
+	testing.expect_value(t, len(pkg.benches), 1)
+}
+
+@(test)
+test_detached_annotations_are_reported :: proc(t: ^testing.T) {
+	source := `package gap_bench
+
+import obench "../obench"
+
+// @zero_alloc
+
+bench_gap :: proc(b: ^obench.Bencher) {}
+
+// @zero_alloc
+bench_attached :: proc(b: ^obench.Bencher) {}
+
+// Mentions @zero_alloc in prose, so it is not an annotation.
+`
+	dir, ok := _write_temp_package(t, "gap_bench.odin", source)
+	if !ok {
+		return
+	}
+	defer os.remove_all(dir)
+
+	pkg, status := discover_package(dir)
+	defer destroy_discovered_package(&pkg)
+	if !testing.expect_value(t, status, Discover_Status.Benchmark_Package) ||
+	   !testing.expect_value(t, len(pkg.benches), 2) {
+		return
+	}
+	testing.expect(t, !pkg.benches[0].zero_alloc)
+	testing.expect(t, pkg.benches[1].zero_alloc)
+	testing.expect_value(t, len(pkg.warnings), 1)
+	if len(pkg.warnings) == 1 {
+		testing.expect(t, strings.contains(pkg.warnings[0], "gap_bench.odin(5)"))
+	}
 }
 
 @(test)
@@ -324,14 +510,16 @@ test_generate_runner_source :: proc(t: ^testing.T) {
 @(private = "file")
 _write_test_file :: proc(t: ^testing.T, root, rel_dir, file_name, source: string) {
 	dir, _ := filepath.join({root, rel_dir}, context.temp_allocator)
-	testing.expect_value(t, os.make_directory_all(dir), nil)
+	if mk_err := os.make_directory_all(dir); mk_err != os.General_Error.Exist {
+		testing.expect_value(t, mk_err, nil)
+	}
 	path, _ := filepath.join({dir, file_name}, context.temp_allocator)
 	testing.expect_value(t, os.write_entire_file(path, source), nil)
 }
 
 @(private = "file")
 _discovered_names :: proc(root: string) -> []string {
-	packages := discover_all_packages(root)
+	packages, _ := discover_all_packages(root)
 	defer {
 		for &p in packages {
 			destroy_discovered_package(&p)

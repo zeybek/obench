@@ -4,6 +4,8 @@ import "core:encoding/csv"
 import "core:fmt"
 import "core:io"
 import "core:os"
+import "core:strconv"
+import "core:strings"
 
 /*
 Column header of the CSV report written by `write_csv_report`.
@@ -37,13 +39,20 @@ CSV_HEADER :: [?]string {
 	"temp_bytes_per_op",
 }
 
+// Shortest decimal that round-trips, without an exponent (`0.0000125`, not `0.0000`).
 @(private = "file")
 _csv_number :: proc(v: f64) -> string {
-	return fmt.tprintf("%.4f", v)
+	buf: [384]u8 // Enough for every f64 written without an exponent
+	s := strconv.write_float(buf[:], v, 'f', -1, 64)
+	if len(s) > 0 && s[0] == '+' {
+		s = s[1:]
+	}
+	return strings.clone(s, context.temp_allocator)
 }
 
 /*
-Writes an RFC 4180 CSV report (CRLF line endings, quoted where needed) to `w`.
+Writes an RFC 4180 CSV report (CRLF line endings, quoted where needed) to `w`. `param` and
+`threads` are empty for benchmarks without `@params` or `@threads`.
 */
 @(require_results)
 write_csv_report :: proc(w: io.Writer, s: ^Suite) -> io.Error {
@@ -55,15 +64,15 @@ write_csv_report :: proc(w: io.Writer, s: ^Suite) -> io.Error {
 	header := CSV_HEADER
 	csv.write(&cw, header[:]) or_return
 
-	for r in s.results {
+	for &r in s.results {
 		st := r.stats
 		record := [?]string {
 			s.name,
 			r.full_name,
 			r.group_name,
 			r.name,
-			fmt.tprintf("%d", r.param),
-			fmt.tprintf("%d", r.threads),
+			r.has_param ? fmt.tprintf("%d", r.param) : "",
+			r.has_threads ? fmt.tprintf("%d", r.threads) : "",
 			bench_error_string(r.error),
 			fmt.tprintf("%d", st.samples),
 			fmt.tprintf("%d", st.batch_size),

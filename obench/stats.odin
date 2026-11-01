@@ -66,7 +66,7 @@ Stats :: struct {
 	alloc_bytes_per_op:   f64,
 	temp_allocs_per_op:   f64,
 	temp_bytes_per_op:    f64,
-	peak_heap_bytes:      i64,
+	peak_heap_bytes:      i64, // Most heap bytes live at once during one measured sample (allocated while measuring)
 
 	// Custom user metrics
 	custom_metrics:       [MAX_CUSTOM_METRICS]Custom_Metric,
@@ -660,7 +660,7 @@ compute_suite_summary :: proc "contextless" (results: []Result) -> Suite_Summary
 	ratio_log_sum: f64 = 0
 	diff_count := 0
 
-	for r in results {
+	for &r in results {
 		if r.stats.p50_ns > 0 {
 			log_sum += math.ln(r.stats.p50_ns)
 			valid_count += 1

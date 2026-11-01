@@ -6,6 +6,7 @@ import "core:fmt"
 import "core:math"
 import "core:os"
 import "core:slice"
+import "core:strconv"
 import "core:strings"
 import "core:testing"
 import "core:time"
@@ -841,4 +842,290 @@ test_merge_reports_and_filter_baseline_by_suite :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(loaded), 2)
 	testing.expect(t, "only_in_suite_b" in loaded)
 	testing.expect(t, "only_in_suite_a" not_in loaded)
+}
+
+@(private = "file")
+_heap_metric_unit :: proc(b: ^obench.Bencher) {
+	unit := strings.clone("ops_heap")
+	obench.report_metric(b, 7, unit)
+	delete(unit) // The suite must have copied it already.
+	long_unit := strings.repeat("é", 20, context.temp_allocator) // 40 bytes
+	obench.report_metric(b, 8, long_unit)
+	for obench.step(b) {
+		_ = obench.black_box(1)
+	}
+}
+
+@(test)
+test_metric_unit_is_copied_when_reported :: proc(t: ^testing.T) {
+	s := obench.suite_create("metric_copy", quick_config())
+	defer obench.suite_destroy(&s)
+	obench.bench(&s, "metric", _heap_metric_unit)
+
+	testing.expect(t, obench.suite_run(&s))
+	m := s.results[0].stats
+	testing.expect_value(t, m.custom_metrics_count, 2)
+	testing.expect_value(t, m.custom_metrics[0].unit, "ops_heap")
+	testing.expect_value(t, m.custom_metrics[0].value, 7.0)
+	// Cut at a UTF-8 boundary: 16 two-byte runes fit in MAX_METRIC_UNIT_LEN (32) bytes.
+	testing.expect_value(t, len(m.custom_metrics[1].unit), 32)
+	testing.expect_value(
+		t,
+		m.custom_metrics[1].unit,
+		strings.repeat("é", 16, context.temp_allocator),
+	)
+}
+
+@(private = "file")
+_step_then_parallel :: proc(b: ^obench.Bencher) {
+	for obench.step(b) {
+		_ = obench.black_box(1)
+	}
+	obench.run_parallel(b, proc(pb: ^obench.Parallel_Bencher) {
+			for obench.parallel_next(pb) {
+				_ = obench.black_box(1)
+			}
+		}, num_threads = 2)
+}
+
+@(private = "file")
+_batched_twice :: proc(b: ^obench.Bencher) {
+	for _ in 0 ..< 2 {
+		obench.iter_batched(b, setup = proc(b: ^obench.Bencher) -> int {
+				return 1
+			}, routine = proc(v: ^int) {
+				_ = obench.black_box(v^)
+			})
+	}
+}
+
+@(test)
+test_second_measurement_is_rejected :: proc(t: ^testing.T) {
+	s := obench.suite_create("measured_twice", quick_config())
+	defer obench.suite_destroy(&s)
+	obench.bench(&s, "step_then_parallel", _step_then_parallel)
+	obench.bench(&s, "batched_twice", _batched_twice)
+
+	testing.expect(t, !obench.suite_run(&s))
+	testing.expect_value(t, s.results[0].error, obench.Bench_Error.Measured_Twice)
+	testing.expect_value(t, s.results[1].error, obench.Bench_Error.Measured_Twice)
+	testing.expect_value(t, obench.bench_error_string(.Measured_Twice), "measured_twice")
+}
+
+@(private = "file")
+_parallel_threads_seen: int
+
+@(private = "file")
+_parallel_default_threads :: proc(b: ^obench.Bencher) {
+	obench.run_parallel(b, proc(pb: ^obench.Parallel_Bencher) {
+		intrinsics.atomic_store_explicit(&_parallel_threads_seen, pb.num_threads, .Relaxed)
+		for obench.parallel_next(pb) {
+			_ = obench.black_box(1)
+		}
+	})
+}
+
+@(test)
+test_run_parallel_defaults_to_four_threads :: proc(t: ^testing.T) {
+	s := obench.suite_create("parallel_default", quick_config())
+	defer obench.suite_destroy(&s)
+	obench.bench(&s, "default_threads", _parallel_default_threads)
+
+	testing.expect(t, obench.suite_run(&s))
+	testing.expect_value(t, intrinsics.atomic_load(&_parallel_threads_seen), 4)
+}
+
+@(private = "file")
+_allocs_then_expects_zero :: proc(b: ^obench.Bencher) {
+	for obench.step(b) {
+		buf := make([]u8, 24)
+		obench.keep_alive(&buf)
+		delete(buf)
+	}
+	obench.expect_zero_allocs(b) // Called after the loop, on purpose.
+}
+
+@(test)
+test_late_expect_zero_allocs_reports_the_location :: proc(t: ^testing.T) {
+	s := obench.suite_create("late_expect_zero", quick_config())
+	defer obench.suite_destroy(&s)
+	obench.bench(&s, "late", _allocs_then_expects_zero)
+
+	testing.expect(t, !obench.suite_run(&s))
+	r := &s.results[0]
+	testing.expect(t, r.zero_alloc_failed)
+	testing.expect_value(t, r.violation_size, 24)
+	testing.expect(t, r.violation_loc.line > 0, "the first allocation's location must be recorded")
+}
+
+@(private = "file")
+_kept_buffers: [dynamic][]u8
+
+@(private = "file")
+_keeps_until_next_sample :: proc(b: ^obench.Bencher) {
+	// Runs before the loop, outside the measurement.
+	for buf in _kept_buffers {
+		delete(buf)
+	}
+	clear(&_kept_buffers)
+	for obench.step(b) {
+		append(&_kept_buffers, make([]u8, 100))
+	}
+}
+
+@(test)
+test_peak_heap_bytes_is_per_sample :: proc(t: ^testing.T) {
+	_kept_buffers = make([dynamic][]u8, 0, 64)
+	defer {
+		for buf in _kept_buffers {
+			delete(buf)
+		}
+		delete(_kept_buffers)
+	}
+
+	s := obench.suite_create("peak_per_sample", quick_config()) // 16 iterations per sample
+	defer obench.suite_destroy(&s)
+	obench.bench(&s, "keeps", _keeps_until_next_sample)
+
+	testing.expect(t, obench.suite_run(&s))
+	testing.expect_value(t, s.results[0].stats.peak_heap_bytes, i64(16 * 100))
+}
+
+@(private = "file")
+_spins_param :: proc(b: ^obench.Bencher) {
+	for obench.step(b) {
+		acc := 0
+		for i in 0 ..< b.param {
+			acc += obench.black_box(i)
+		}
+		_ = obench.black_box(acc)
+	}
+}
+
+@(test)
+test_thread_speedups_compare_the_same_param :: proc(t: ^testing.T) {
+	s := obench.suite_create("speedup_per_param", quick_config())
+	defer obench.suite_destroy(&s)
+	g := obench.group_add(&s, "scale")
+	obench.group_params(g, []int{1, 2000})
+	obench.group_threads(g, []int{1, 2})
+	obench.group_bench(g, "spin", _spins_param)
+
+	testing.expect(t, obench.suite_run(&s))
+	testing.expect_value(t, len(s.results), 4)
+	// Results run params × threads: [1]/t1, [1]/t2, [2000]/t1, [2000]/t2.
+	testing.expect_value(t, s.results[2].full_name, "scale::spin[2000]/t1")
+	testing.expect_value(t, s.results[2].speedup_vs_first, 1.0)
+}
+
+@(private = "file")
+_spin_for :: proc(d: time.Duration) {
+	start := time.tick_now()
+	for time.tick_since(start) < d {
+		intrinsics.cpu_relax()
+	}
+}
+
+@(private = "file")
+_heavy_setup :: proc(b: ^obench.Bencher) {
+	obench.iter_batched(b, setup = proc(b: ^obench.Bencher) -> int {
+			_spin_for(100 * time.Microsecond)
+			return 1
+		}, routine = proc(v: ^int) {
+			_ = obench.black_box(v^)
+		})
+}
+
+@(test)
+test_calibration_is_bounded_by_wall_time :: proc(t: ^testing.T) {
+	cfg := quick_config()
+	cfg.fixed_batch_size = 0 // Calibrate.
+	s := obench.suite_create("heavy_setup", cfg)
+	defer obench.suite_destroy(&s)
+	obench.bench(&s, "heavy_setup", _heavy_setup)
+
+	start := time.tick_now()
+	testing.expect(t, obench.suite_run(&s))
+	elapsed := time.tick_since(start)
+	// Unbounded, calibration grows the batch until the ~1 ns routine fills 50 us of timed
+	// work, which takes seconds of 100 us setups.
+	testing.expectf(t, elapsed < 1500 * time.Millisecond, "calibration took %v", elapsed)
+}
+
+@(test)
+test_unmatched_filter_keeps_existing_reports :: proc(t: ^testing.T) {
+	path := ".obench_test_filter_keep.json"
+	defer _ = os.remove(path)
+
+	cfg := quick_config()
+	cfg.baseline_save_path = path
+	{
+		s := obench.suite_create("filter_keep", cfg)
+		defer obench.suite_destroy(&s)
+		obench.bench(&s, "noop", _noop_step)
+		testing.expect(t, obench.suite_run(&s))
+	}
+	before, err := os.read_entire_file(path, context.temp_allocator)
+	testing.expect_value(t, err, nil)
+
+	cfg.filter = "no_such_benchmark"
+	s := obench.suite_create("filter_keep", cfg)
+	defer obench.suite_destroy(&s)
+	obench.bench(&s, "noop", _noop_step)
+	testing.expect(t, obench.suite_run(&s))
+	testing.expect_value(t, len(s.results), 0)
+
+	after, after_err := os.read_entire_file(path, context.temp_allocator)
+	testing.expect_value(t, after_err, nil)
+	testing.expect(t, string(before) == string(after), "the saved baseline must not be replaced")
+}
+
+@(test)
+test_comparison_counts_benchmarks_that_started_failing :: proc(t: ^testing.T) {
+	base_entries := []obench.Export_Entry {
+		{suite_name = "s", full_name = "ok", samples = 10, p50_ns = 10, mean_ns = 10},
+		{suite_name = "s", full_name = "breaks", samples = 10, p50_ns = 10, mean_ns = 10},
+	}
+	cand_entries := []obench.Export_Entry {
+		{suite_name = "s", full_name = "ok", samples = 10, p50_ns = 10, mean_ns = 10},
+		{suite_name = "s", full_name = "breaks", error = "no_measurement"},
+	}
+	baseline := obench.Export_Document {
+		benchmarks = base_entries,
+	}
+	candidate := obench.Export_Document {
+		benchmarks = cand_entries,
+	}
+
+	sb := strings.builder_make(context.temp_allocator)
+	summary := obench.write_comparison(strings.to_writer(&sb), baseline, candidate, 2.0, false)
+	testing.expect_value(t, summary.matched, 1)
+	testing.expect_value(t, summary.errored, 1)
+	testing.expect_value(t, summary.only_in_baseline, 0)
+	testing.expect(t, strings.contains(strings.to_string(sb), "no_measurement"))
+}
+
+@(test)
+test_csv_keeps_precision_and_leaves_unset_columns_empty :: proc(t: ^testing.T) {
+	path := ".obench_test_precision.csv"
+	defer _ = os.remove(path)
+
+	cfg := quick_config()
+	cfg.csv_export_path = path
+	s := obench.suite_create("csv_precision", cfg)
+	defer obench.suite_destroy(&s)
+	obench.bench(&s, "noop", _noop_step)
+	testing.expect(t, obench.suite_run(&s))
+
+	data, err := os.read_entire_file(path, context.temp_allocator)
+	testing.expect_value(t, err, nil)
+	lines := strings.split_lines(string(data), context.temp_allocator)
+	testing.expect(t, len(lines) >= 2)
+	fields := strings.split(strings.trim_right(lines[1], "\r"), ",", context.temp_allocator)
+	testing.expect_value(t, fields[4], "") // param
+	testing.expect_value(t, fields[5], "") // threads
+	// p50 written without a fixed number of decimals: it parses back to the same value.
+	p50, ok := strconv.parse_f64(fields[10])
+	testing.expect(t, ok)
+	testing.expect_value(t, p50, s.results[0].stats.p50_ns)
 }

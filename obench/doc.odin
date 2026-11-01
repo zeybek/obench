@@ -47,7 +47,8 @@ Put benchmarks in a package (usually a `*_bench.odin` file) as procedures named
 `bench_<name>` that take a `^Bencher`. No `main` is needed, the CLI finds them with
 `core:odin/parser`. Only the body of the `step` loop is timed and counted. Leaving the loop
 early with `break` or `return` is reported as an error, because the sample would be
-incomplete.
+incomplete. A benchmark measures once: calling `iter_batched`, `iter_with_large_drop`, or
+`run_parallel` after another measurement is reported as an error too.
 
 `black_box` stops the compiler from constant-folding an input or deleting an unused result.
 `keep_alive` makes it assume the memory behind a pointer is read, so stores into it can't
@@ -92,9 +93,10 @@ how many inputs exist at once: `.Small_Input` (up to 4096), `.Large_Input` (128)
 
 Multi-threaded benchmarks
 
-`run_parallel` splits the iteration budget across threads. Threads are created and released
-outside the timed window, and they start from a spin-wait on a shared flag, so wake-up
-latency isn't measured.
+`run_parallel` splits the iteration budget across threads: the group's `@threads` count, or
+4 outside a thread-scaling group, unless `num_threads` is passed. Threads are created and
+released outside the timed window, and the clock starts once every thread spins on a shared
+start flag, so wake-up latency isn't measured.
 
 	// @zero_alloc
 	// @threads(1, 2, 4)
@@ -108,20 +110,26 @@ latency isn't measured.
 	}
 
 The time per operation is wall time divided by the total iteration count across all
-threads, so perfect scaling halves it each time the thread count doubles. Heap allocations
-from workers go through the benchmark's counting allocator, which means the allocator behind
-`context.allocator` has to be thread-safe (the default heap allocator is).
+threads, so perfect scaling halves it each time the thread count doubles. Workers use the
+benchmark's `context.allocator` (the counting allocator while sampling), which means the
+allocator behind it has to be thread-safe (the default heap allocator is).
 
 Running benchmarks
 
-The CLI searches the directory and all subdirectories, skipping hidden ones and copies of
-obench itself. A package is a benchmark package if it has `bench_*` procedures with the
-`proc(b: ^Bencher)` signature, or if it has its own `main` and a `*_bench.odin` file. Other
-programs are never run. For packages without a `main`, the CLI writes a small runner package
-into a temporary directory, imports your package from there, and deletes it afterwards.
-Nothing is written into your source tree. The compiler comes from `$ODIN` when it is set,
-otherwise from `PATH`. Exit status is 0 on success, 1 when a benchmark, a gate, or a build
-failed, and 2 for usage errors such as an unknown option. `obench help` lists the options.
+The CLI searches the directory and its subdirectories, skipping hidden ones, symbolic links,
+and copies of obench itself. Like the compiler, it leaves out files built only for another
+platform (`_windows.odin`, `_linux_amd64.odin`, `#+build linux`) and `#+ignore` files. A
+package is a benchmark package if it has `bench_*` procedures with the `proc(b: ^Bencher)`
+signature, or if it has its own `main` and a `*_bench.odin` file. Other programs are never
+run. For packages without a `main`, the CLI writes a small runner package into a temporary
+directory, imports your package from there, and deletes it afterwards. Nothing is written
+into your source tree. The compiler comes from `$ODIN` when it is set, otherwise from `PATH`.
+
+Exit status is 0 on success, 1 when a benchmark, a gate, or a build failed, or a directory
+with `*_bench.odin` files couldn't be parsed (the other packages still run), and 2 for usage
+errors such as an unknown option, or a short flag given together with its long form
+(`-n 5 --samples 100`). An annotation comment separated from its procedure by a blank line
+is not read, so the CLI warns about it. `obench help` lists the options.
 
 A program can also run benchmarks from its own `main`. `suite_create` reads the `OBENCH_*`
 environment variables and the command-line flags, so a program like this accepts
@@ -160,7 +168,9 @@ Each sample is one calibrated batch (at least 1 ms by default), and the columns 
 operation. `x faster` and `x slower` compare each benchmark with the first one in its group
 for the same parameter, and only appear when the Mann-Whitney U test finds the difference
 significant and it is above 3%. Smaller or noisy differences show as `~1.04x (noise)`. The
-sparkline is a histogram of the samples between the fastest and p99.
+sparkline is a histogram of the samples between the fastest and p99. `[near timer
+resolution]` marks a benchmark whose sample is less than 100 clock ticks long (an expensive
+`iter_batched` setup can cut calibration short), so its times are quantized by 1% or more.
 
 `allocs / bytes` counts allocator calls that obtain memory, which includes resizes: building
 a 64-item dynamic array from capacity 16 shows `3.0 / 512 B` (one allocation, two resizes).
@@ -186,13 +196,22 @@ shift of the rest. Reports keep every sample for this (`samples_ns`, since forma
 Against an older report without samples, Welch's t-test on the means is used instead.
 `--fail-on-regression` turns regressions into exit status 1, which makes it usable as a CI
 gate. A baseline file that can't be read also fails the run, so a typo in the path doesn't
-pass silently.
+pass silently. A baseline that holds none of a suite's benchmarks (a renamed suite, or the
+wrong file) prints a warning and fails the run under `--fail-on-regression`. `obench compare
+--fail-on-regression` also fails when a benchmark that worked in the baseline reports an
+error in the candidate; benchmarks found on one side only are listed but don't fail it.
+
+A `--filter` that matches nothing writes no report files, so a typo can't replace a saved
+baseline with an empty one.
 
 When the CLI runs several packages, `--json`, `--save-baseline`, `--csv`, and `--md` write one
 merged file, with the suite name on every entry. `--spall` writes one trace per package
 (`trace.spall` becomes `trace.sorting_bench.spall` and so on). Each package is its own suite,
-named after the package. When two directories hold packages with the same name, their suites
-also carry the directory, as in `bench (net/http)`. A program with its own `main` names its
+named after the package, and compares only with the entries of its own suite in a baseline.
+When two directories hold packages with the same name, their suites also carry the directory
+relative to the path given to the CLI, as in `bench (net/http)`, so compare runs started
+from the same directory. The merged JSON report takes its Odin version, optimization mode,
+and platform from the packages' own reports. A program with its own `main` names its
 suites itself, and if two such programs use the same suite name the CLI doesn't write the
 merged JSON report, because a later comparison could match the wrong benchmarks.
 
@@ -248,7 +267,9 @@ Limits
 - The Big-O fit tries `T(N) = a + c * f(N)` for each class, so a fixed cost per call doesn't
   bend the curve, and only reports a growing class when it fits significantly better than a
   constant (an F-test at the 5% level). With 3 sizes that test is strict, so a noisy curve
-  over few sizes can come out as O(1). Use 4 or more sizes when the class matters.
+  over few sizes can come out as O(1). Use 4 or more sizes when the class matters. For O(1)
+  the reported R² is 1 - NRMSE², how flat the times are, since a constant explains no
+  variance.
 - Spall traces begin and end spans with `core:prof/spall`'s `_buffer_begin` and
   `_buffer_end`, as its package documentation shows, and name the process and thread with
   `_buffer_name_process` and `_buffer_name_thread`, which it doesn't document.

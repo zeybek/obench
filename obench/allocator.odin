@@ -174,10 +174,20 @@ _record_growth :: #force_inline proc "contextless" (
 @(private = "file")
 _record_shrink :: #force_inline proc "contextless" (c: ^Counting_Allocator, bytes: int) {
 	_ = intrinsics.atomic_add_explicit(&c.bytes_freed, u64(bytes), .Relaxed)
-	cur := intrinsics.atomic_sub_explicit(&c.current_bytes, i64(bytes), .Relaxed) - i64(bytes)
-	if cur < 0 {
-		// Memory allocated while paused was released; clamp instead of going negative.
-		intrinsics.atomic_store_explicit(&c.current_bytes, 0, .Relaxed)
+	// Memory allocated while paused may be released while counting: clamp at 0 instead of
+	// going negative, without losing another thread's concurrent growth.
+	for {
+		cur := intrinsics.atomic_load_explicit(&c.current_bytes, .Relaxed)
+		next := max(cur - i64(bytes), 0)
+		if _, ok := intrinsics.atomic_compare_exchange_weak_explicit(
+			&c.current_bytes,
+			cur,
+			next,
+			.Relaxed,
+			.Relaxed,
+		); ok {
+			break
+		}
 	}
 }
 
