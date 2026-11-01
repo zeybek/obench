@@ -317,7 +317,7 @@ Example:
 package obench
 
 // Version of the obench library and CLI.
-VERSION :: "0.1.0" // x-release-please-version
+VERSION :: "0.2.0" // x-release-please-version
 
 // Default number of samples collected per benchmark.
 DEFAULT_SAMPLES: int : #config(OBENCH_SAMPLES, 50)
