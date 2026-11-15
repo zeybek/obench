@@ -66,7 +66,10 @@ Stats :: struct {
 	alloc_bytes_per_op:   f64,
 	temp_allocs_per_op:   f64,
 	temp_bytes_per_op:    f64,
-	peak_heap_bytes:      i64, // Most heap bytes live at once during one measured sample (allocated while measuring)
+	// Most heap bytes live at once during one measured sample (allocated while measuring). When
+	// the benchmark frees with `free`, which doesn't pass the size, it comes from one extra
+	// untimed batch that records the size of every block.
+	peak_heap_bytes:      i64,
 
 	// Custom user metrics
 	custom_metrics:       [MAX_CUSTOM_METRICS]Custom_Metric,

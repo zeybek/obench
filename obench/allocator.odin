@@ -2,6 +2,7 @@ package obench
 
 import "base:intrinsics"
 import "base:runtime"
+import "core:sync"
 
 /*
 Lock-free allocation counter that wraps any `runtime.Allocator`.
@@ -14,6 +15,12 @@ What is counted while not paused:
 - `alloc_count`: `.Alloc` / `.Alloc_Non_Zeroed` calls, and `.Resize*` calls on a nil pointer.
 - `resize_count`: `.Resize*` calls on an existing allocation with a non-zero new size.
 - `bytes_allocated`: bytes requested by allocations plus the growth of resizes.
+- `freed_without_size`: set by a `.Free` call that doesn't say how big the block was.
+
+`current_bytes` and `peak_bytes` only go down when a free says how many bytes it releases.
+Odin's `free` doesn't (`delete` does), so with `free` they keep growing and `peak_bytes`
+becomes the sum of the allocations; `freed_without_size` shows that this happened. obench's
+`Stats.peak_heap_bytes` is measured in an extra untimed run that tracks every block's size.
 */
 Counting_Allocator :: struct {
 	backing:              runtime.Allocator,
@@ -28,8 +35,44 @@ Counting_Allocator :: struct {
 	paused:               bool,
 	enforce_zero_allocs:  bool,
 	zero_alloc_violated:  bool,
+	freed_without_size:   bool,
 	first_violation_loc:  runtime.Source_Code_Location,
 	first_violation_size: int,
+	// Set only for the untimed run behind `Stats.peak_heap_bytes` (see `_Size_Tracker`).
+	_tracker:             ^_Size_Tracker,
+}
+
+/*
+Remembers the size of each block allocated while counting, so that a `.Free` without a size
+(Odin's `free`) still lowers `current_bytes`. obench attaches one only to the extra run that
+measures `Stats.peak_heap_bytes`: the map and its lock would add to the time of every
+allocation in a timed sample.
+*/
+@(private)
+_Size_Tracker :: struct {
+	sizes: map[rawptr]int,
+	lock:  sync.Mutex,
+}
+
+// Records that the block at `ptr` holds `size` counted bytes.
+@(private = "file")
+_track :: proc(t: ^_Size_Tracker, ptr: rawptr, size: int) {
+	sync.mutex_lock(&t.lock)
+	defer sync.mutex_unlock(&t.lock)
+	t.sizes[ptr] = size
+}
+
+// Forgets the block at `ptr` and returns how many counted bytes it held. `found` is false for
+// a block allocated while paused or before counting started.
+@(private = "file")
+_untrack :: proc(t: ^_Size_Tracker, ptr: rawptr) -> (size: int, found: bool) {
+	sync.mutex_lock(&t.lock)
+	defer sync.mutex_unlock(&t.lock)
+	size, found = t.sizes[ptr]
+	if found {
+		delete_key(&t.sizes, ptr)
+	}
+	return
 }
 
 /*
@@ -57,6 +100,7 @@ counting_allocator_reset :: proc "contextless" (c: ^Counting_Allocator) {
 	intrinsics.atomic_store_explicit(&c.current_bytes, 0, .Relaxed)
 	intrinsics.atomic_store_explicit(&c.peak_bytes, 0, .Relaxed)
 	intrinsics.atomic_store_explicit(&c.zero_alloc_violated, false, .Relaxed)
+	intrinsics.atomic_store_explicit(&c.freed_without_size, false, .Relaxed)
 	c.first_violation_loc = {}
 	c.first_violation_size = 0
 }
@@ -79,6 +123,10 @@ Returns a `runtime.Allocator` handle backed by `c`.
 */
 @(require_results)
 counting_allocator :: proc "contextless" (c: ^Counting_Allocator) -> runtime.Allocator {
+	if c != nil && c._tracker != nil {
+		// Chosen here, once, so the procedure used in timed samples has no extra branch.
+		return runtime.Allocator{procedure = _sized_counting_allocator_proc, data = c}
+	}
 	return runtime.Allocator{procedure = counting_allocator_proc, data = c}
 }
 
@@ -118,6 +166,9 @@ _counting_allocator_accumulate :: proc "contextless" (dst, src: ^Counting_Alloca
 		intrinsics.atomic_load_explicit(&src.bytes_freed, .Relaxed),
 		.Relaxed,
 	)
+	if intrinsics.atomic_load_explicit(&src.freed_without_size, .Relaxed) {
+		intrinsics.atomic_store_explicit(&dst.freed_without_size, true, .Relaxed)
+	}
 }
 
 @(private = "file")
@@ -254,6 +305,9 @@ counting_allocator_proc :: proc(
 			_ = intrinsics.atomic_add_explicit(&c.free_count, 1, .Relaxed)
 			if old_size > 0 {
 				_record_shrink(c, old_size)
+			} else if !intrinsics.atomic_load_explicit(&c.freed_without_size, .Relaxed) {
+				// A plain flag: a counter would put an atomic add into the timed loop.
+				intrinsics.atomic_store_explicit(&c.freed_without_size, true, .Relaxed)
 			}
 		}
 
@@ -269,4 +323,113 @@ counting_allocator_proc :: proc(
 	}
 
 	return data, err
+}
+
+/*
+The `runtime.Allocator_Proc` that `counting_allocator` returns when a `_Size_Tracker` is
+attached. Sizes come from the tracker instead of the caller, and only bytes allocated while
+counting are in `current_bytes`. A block allocated while paused and resized while counting
+holds its growth.
+*/
+@(private = "file")
+_sized_counting_allocator_proc :: proc(
+	allocator_data: rawptr,
+	mode: runtime.Allocator_Mode,
+	size, alignment: int,
+	old_memory: rawptr,
+	old_size: int,
+	loc := #caller_location,
+) -> (
+	[]byte,
+	runtime.Allocator_Error,
+) {
+	c := (^Counting_Allocator)(allocator_data)
+	if c == nil || c.backing.procedure == nil {
+		return nil, .Invalid_Argument
+	}
+	data, err := c.backing.procedure(
+		c.backing.data,
+		mode,
+		size,
+		alignment,
+		old_memory,
+		old_size,
+		loc,
+	)
+	if err == nil && c._tracker != nil && !intrinsics.atomic_load_explicit(&c.paused, .Relaxed) {
+		_count_with_sizes(c, c._tracker, mode, size, old_memory, old_size, data, loc)
+	}
+	return data, err
+}
+
+// The bookkeeping of `_sized_counting_allocator_proc`.
+@(private = "file")
+_count_with_sizes :: proc(
+	c: ^Counting_Allocator,
+	t: ^_Size_Tracker,
+	mode: runtime.Allocator_Mode,
+	size: int,
+	old_memory: rawptr,
+	old_size: int,
+	data: []byte,
+	loc: runtime.Source_Code_Location,
+) {
+	// Moves `current_bytes` by the change in one block's counted bytes.
+	adjust :: proc(c: ^Counting_Allocator, before, after: int, loc: runtime.Source_Code_Location) {
+		if after > before {
+			_record_growth(c, after - before, loc)
+		} else if after < before {
+			_record_shrink(c, before - after)
+		}
+	}
+
+	switch mode {
+	case .Alloc, .Alloc_Non_Zeroed:
+		if size > 0 {
+			_ = intrinsics.atomic_add_explicit(&c.alloc_count, 1, .Relaxed)
+			_record_growth(c, size, loc)
+			_track(t, raw_data(data), size)
+		}
+
+	case .Resize, .Resize_Non_Zeroed:
+		if old_memory == nil {
+			if size > 0 {
+				_ = intrinsics.atomic_add_explicit(&c.alloc_count, 1, .Relaxed)
+				_record_growth(c, size, loc)
+				_track(t, raw_data(data), size)
+			}
+			return
+		}
+		counted, found := _untrack(t, old_memory)
+		if size == 0 {
+			_ = intrinsics.atomic_add_explicit(&c.free_count, 1, .Relaxed)
+			adjust(c, counted, 0, loc)
+			return
+		}
+		_ = intrinsics.atomic_add_explicit(&c.resize_count, 1, .Relaxed)
+		now := size if found else max(size - old_size, 0)
+		adjust(c, counted, now, loc)
+		if now > 0 {
+			_track(t, raw_data(data), now)
+		}
+
+	case .Free:
+		if old_memory != nil {
+			_ = intrinsics.atomic_add_explicit(&c.free_count, 1, .Relaxed)
+			counted, _ := _untrack(t, old_memory)
+			adjust(c, counted, 0, loc)
+		}
+
+	case .Free_All:
+		_ = intrinsics.atomic_add_explicit(&c.free_all_count, 1, .Relaxed)
+		prev_cur := intrinsics.atomic_exchange_explicit(&c.current_bytes, 0, .Relaxed)
+		if prev_cur > 0 {
+			_ = intrinsics.atomic_add_explicit(&c.bytes_freed, u64(prev_cur), .Relaxed)
+		}
+		sync.mutex_lock(&t.lock)
+		clear(&t.sizes)
+		sync.mutex_unlock(&t.lock)
+
+	case .Query_Features, .Query_Info:
+	}
 }

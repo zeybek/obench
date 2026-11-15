@@ -111,6 +111,28 @@ _run_batch :: proc(
 	return
 }
 
+/*
+Runs one more batch of `batch_size` iterations, untimed, with a counter that records the size
+of every block (see `_Size_Tracker`), and returns the most heap bytes live at once. The
+sampling loop can't do this itself: the map and its lock would be timed with every allocation.
+*/
+@(private = "file")
+_measure_peak_heap :: proc(info: ^_Run_Info, batch_size: int, reset_temp: bool) -> i64 {
+	tracker := _Size_Tracker {
+		sizes = make(map[rawptr]int),
+	}
+	defer delete(tracker.sizes)
+
+	heap_counter: Counting_Allocator
+	counting_allocator_init(&heap_counter, context.allocator)
+	heap_counter._tracker = &tracker
+	_ = _run_batch(info, batch_size, &heap_counter, nil)
+	if reset_temp {
+		runtime.arena_free_all(info.temp_arena)
+	}
+	return intrinsics.atomic_load_explicit(&heap_counter.peak_bytes, .Relaxed)
+}
+
 @(private = "file")
 _fail_entry :: proc(s: ^Suite, result: ^Result, err: Bench_Error) -> Result {
 	result.error = err
@@ -332,6 +354,14 @@ _execute_entry :: proc(
 	)
 	st.samples_ns = slice.clone(ns_samples[:], s.allocator)
 	last_custom_count = 0 // Ownership of the unit strings moves to the result.
+
+	// A `free` that doesn't pass the block's size never lowered the live bytes, so the peak
+	// above may be the sum of the sample's allocations. Measure it again without the clock.
+	if intrinsics.atomic_load_explicit(&heap_counter.freed_without_size, .Relaxed) {
+		spall_begin(spall_rec, "peak heap")
+		st.peak_heap_bytes = _measure_peak_heap(&info, batch_size, cfg.reset_temp_per_iter)
+		spall_end(spall_rec)
+	}
 
 	if base_st, ok := baseline_map[full_name]; ok {
 		result.diff = compare_baseline(st, base_st, cfg.noise_threshold_pct)

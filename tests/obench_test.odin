@@ -1037,6 +1037,64 @@ test_peak_heap_bytes_is_per_sample :: proc(t: ^testing.T) {
 }
 
 @(private = "file")
+_new_and_free :: proc(b: ^obench.Bencher) {
+	for obench.step(b) {
+		p := new([100]u8)
+		obench.keep_alive(p)
+		free(p)
+	}
+}
+
+// At most two blocks are live: the new one and the previous one, freed right after.
+@(private = "file")
+_new_and_free_previous :: proc(b: ^obench.Bencher) {
+	prev: ^[64]u8
+	for obench.step(b) {
+		p := new([64]u8)
+		obench.keep_alive(p)
+		free(prev)
+		prev = p
+	}
+	free(prev)
+}
+
+@(test)
+test_peak_heap_bytes_with_free :: proc(t: ^testing.T) {
+	s := obench.suite_create("peak_with_free", quick_config()) // 16 iterations per sample
+	defer obench.suite_destroy(&s)
+	obench.bench(&s, "new_and_free", _new_and_free)
+	obench.bench(&s, "new_and_free_previous", _new_and_free_previous)
+
+	testing.expect(t, obench.suite_run(&s))
+	// `free` doesn't pass the size; summing the allocations would give 1600 and 1024.
+	testing.expect_value(t, s.results[0].stats.peak_heap_bytes, i64(100))
+	testing.expect_value(t, s.results[1].stats.peak_heap_bytes, i64(128))
+	testing.expect_value(t, s.results[0].stats.allocs_per_op, 1.0)
+}
+
+@(test)
+test_counting_allocator_flags_frees_without_a_size :: proc(t: ^testing.T) {
+	ca: obench.Counting_Allocator
+	obench.counting_allocator_init(&ca, context.allocator)
+	alloc := obench.counting_allocator(&ca)
+
+	buf := make([]byte, 32, alloc)
+	delete(buf, alloc)
+	testing.expect_value(t, ca.freed_without_size, false)
+	testing.expect_value(t, ca.current_bytes, i64(0))
+
+	p := new(int, alloc)
+	free(p, alloc)
+	testing.expect_value(t, ca.free_count, u64(2))
+	testing.expect_value(t, ca.freed_without_size, true)
+	// The documented limit: without a size the live bytes can't go down.
+	testing.expect_value(t, ca.current_bytes, i64(size_of(int)))
+
+	obench.counting_allocator_reset(&ca)
+	testing.expect_value(t, ca.freed_without_size, false)
+}
+
+@(private = "file")
 _spins_param :: proc(b: ^obench.Bencher) {
 	for obench.step(b) {
 		acc := 0
