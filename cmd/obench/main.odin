@@ -1394,8 +1394,31 @@ _odin_executable :: proc() -> string {
 	return "odin"
 }
 
-// Builds and runs one package. Returns false if the build or the benchmarks failed.
-// `suite_name` names the generated runner's suite; a package with its own main names its own.
+// Runs `cmd` with the CLI's standard streams and reports whether it exited with status 0.
+@(private = "file")
+_run_process :: proc(cmd: []string) -> bool {
+	child, start_err := os.process_start(
+		os.Process_Desc{command = cmd, stdout = os.stdout, stderr = os.stderr, stdin = os.stdin},
+	)
+	if start_err != nil {
+		fmt.eprintfln("obench: could not start '%s': %v", cmd[0], start_err)
+		return false
+	}
+	state, wait_err := os.process_wait(child)
+	// `state.success` only says whether the process crashed, and it is always true on
+	// Windows, so a failed run is detected by its exit code.
+	return wait_err == nil && state.exited && state.exit_code == 0
+}
+
+/*
+Builds and runs one package. Returns false if the build or the benchmarks failed.
+`suite_name` names the generated runner's suite; a package with its own main names its own.
+
+The package is built with `odin build` and the executable is started separately, because
+the compiler can exit with status 0 without building anything: an unknown `-microarch`
+value makes it print the valid ones and stop. Treating that as a passed run would switch a
+regression gate off.
+*/
 run_package :: proc(
 	pkg: Discovered_Package,
 	index: int,
@@ -1411,7 +1434,7 @@ run_package :: proc(
 	exe_path, _ := filepath.join({work_dir, exe_name}, context.temp_allocator)
 
 	cmd := make([dynamic]string, context.temp_allocator)
-	append(&cmd, _odin_executable(), "run")
+	append(&cmd, _odin_executable(), "build")
 
 	if pkg.has_main {
 		append(&cmd, pkg.dir_path)
@@ -1456,25 +1479,23 @@ run_package :: proc(
 	for def in opts.defines {
 		append(&cmd, fmt.tprintf("-define:%s", def))
 	}
-	append(&cmd, "--")
-	append(&cmd, .._runtime_args(opts, outputs))
 
-	child, start_err := os.process_start(
-		os.Process_Desc {
-			command = cmd[:],
-			stdout = os.stdout,
-			stderr = os.stderr,
-			stdin = os.stdin,
-		},
-	)
-	if start_err != nil {
-		fmt.eprintfln("obench: could not start '%s': %v", cmd[0], start_err)
+	if !_run_process(cmd[:]) {
 		return false
 	}
-	state, wait_err := os.process_wait(child)
-	// `state.success` only says whether the process crashed, and it is always true on
-	// Windows, so a failed run is detected by its exit code.
-	return wait_err == nil && state.exited && state.exit_code == 0
+	if !os.exists(exe_path) {
+		fmt.eprintfln(
+			"obench: '%s build' exited with status 0 but did not build '%s'; its output above says why (an unknown --microarch value does this)",
+			cmd[0],
+			exe_path,
+		)
+		return false
+	}
+
+	run_cmd := make([dynamic]string, context.temp_allocator)
+	append(&run_cmd, exe_path)
+	append(&run_cmd, .._runtime_args(opts, outputs))
+	return _run_process(run_cmd[:])
 }
 
 // Path of one package's partial report inside the work directory.

@@ -104,6 +104,14 @@ set -e
 [ "$code" -eq 1 ] || fail "expected exit 1 when no suite matches the baseline, got $code"
 grep -q "nothing was compared" "$WORK/dup_err.txt" || fail "expected a 'nothing was compared' warning"
 
+step "a build that exits 0 without an executable (unknown --microarch) fails the run"
+set +e
+"$OBENCH" "$WORK_N/dup/a" --collection "libs=$ROOT_N" -n 5 -w 2 --no-color --microarch obench-no-such-cpu \
+  --baseline "$WORK_N/dup_a.json" --fail-on-regression >/dev/null 2> "$WORK/march_err.txt"; code=$?
+set -e
+[ "$code" -eq 1 ] || fail "expected exit 1 for an unknown --microarch, got $code"
+grep -q "did not build" "$WORK/march_err.txt" || fail "expected a 'did not build' error"
+
 step "a benchmark package that does not parse fails the run"
 mkdir -p "$WORK/parse/good" "$WORK/parse/bad"
 cp "$WORK/dup/a/dup_bench.odin" "$WORK/parse/good/good_bench.odin"
