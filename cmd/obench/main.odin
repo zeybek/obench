@@ -92,9 +92,10 @@ USAGE:
 DISCOVERY:
   Every package under dir (searched recursively, hidden directories and symlinks skipped)
   that defines 'bench_<name> :: proc(b: ^obench.Bencher)' procedures is built into a
-  temporary runner. Files for other platforms (_windows.odin, #+build linux) and #+ignore
-  files are left out, as the compiler does. Packages with their own main() run as-is if they
-  define benchmarks or a *_bench.odin file. Nothing is written into your source directories.
+  temporary runner. Files for other platforms (_windows.odin, #+build linux), #+ignore files,
+  and #+test files are left out, as 'odin build' does. Packages with their own main() run
+  as-is if they define benchmarks or a *_bench.odin file. Nothing is written into your source
+  directories.
 
   bench_<group>__<name>          Group related benchmarks (shared params, speedup column)
   // @group(name)                Set the group explicitly
@@ -723,10 +724,27 @@ excluded_by_file_name :: proc(name: string) -> bool {
 }
 
 /*
+Reports whether `file` has a `#+test` tag. The compiler builds such a file only for `odin
+test`, and the CLI builds the runner with `odin build`, so the runner can't see what the file
+declares. `File_Tags` in `core:odin/parser` has no field for this tag, so it is matched the
+way the compiler's `parse_file_tag` does: the text after `#+` starts with `test`.
+*/
+@(private = "file")
+_is_test_only_file :: proc(file: ^ast.File) -> bool {
+	for tag in file.tags {
+		if strings.has_prefix(tag.text, "#+") &&
+		   strings.has_prefix(strings.trim_space(tag.text[2:]), "test") {
+			return true
+		}
+	}
+	return false
+}
+
+/*
 Parses the `.odin` files of the package in `dir` that the compiler would build for this OS
-and architecture (file-name suffixes and `#+build` / `#+ignore` tags). `ok` is false when an
-included file has a syntax error. Lists the directory instead of using a glob, so paths with
-`[` or `]` work.
+and architecture with `odin build` (file-name suffixes, `#+build` / `#+ignore` tags, and no
+`#+test` files). `ok` is false when an included file has a syntax error. Lists the directory
+instead of using a glob, so paths with `[` or `]` work.
 */
 @(private = "file")
 _parse_target_package :: proc(dir: string, p: ^parser.Parser) -> (pkg: ^ast.Package, ok: bool) {
@@ -767,7 +785,8 @@ _parse_target_package :: proc(dir: string, p: ^parser.Parser) -> (pkg: ^ast.Pack
 		file.src = string(src)
 		file.fullpath = fullpath
 		parsed := parser.parse_file(p, file)
-		if !parser.match_build_tags(parser.parse_file_tags(file^), target) {
+		if !parser.match_build_tags(parser.parse_file_tags(file^), target) ||
+		   _is_test_only_file(file) {
 			continue
 		}
 		if !parsed {

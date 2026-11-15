@@ -117,8 +117,9 @@ allocator behind it has to be thread-safe (the default heap allocator is).
 Running benchmarks
 
 The CLI searches the directory and its subdirectories, skipping hidden ones, symbolic links,
-and copies of obench itself. Like the compiler, it leaves out files built only for another
-platform (`_windows.odin`, `_linux_amd64.odin`, `#+build linux`) and `#+ignore` files. A
+and copies of obench itself. Like `odin build`, it leaves out files built only for another
+platform (`_windows.odin`, `_linux_amd64.odin`, `#+build linux`), `#+ignore` files, and
+`#+test` files, which only `odin test` builds. A
 package is a benchmark package if it has `bench_*` procedures with the `proc(b: ^Bencher)`
 signature, or if it has its own `main` and a `*_bench.odin` file. Other programs are never
 run. For packages without a `main`, the CLI writes a small runner package into a temporary

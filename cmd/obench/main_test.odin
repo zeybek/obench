@@ -400,6 +400,21 @@ test_discover_honors_build_constraints :: proc(t: ^testing.T) {
 		"d_ignored.odin",
 		"#+build ignore\npackage tags_bench\n\nmain :: proc() {}\n",
 	)
+	// Built only by `odin test`, so the runner can't see these.
+	_write_test_file(
+		t,
+		root,
+		"pkg",
+		"e_test_only.odin",
+		fmt.tprintf("#+test\n%sbench_test_only :: proc(b: ^obench.Bencher) {{}}\n", header),
+	)
+	_write_test_file(
+		t,
+		root,
+		"pkg",
+		"f_test_only_main.odin",
+		"#+private\n#+test\npackage tags_bench\n\nmain :: proc() {}\n",
+	)
 
 	dir, _ := filepath.join({root, "pkg"}, context.temp_allocator)
 	pkg, status := discover_package(dir)
