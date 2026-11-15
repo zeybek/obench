@@ -264,6 +264,9 @@ Loads a saved JSON report into `out_map`, keyed by `full_name`. Keys and each en
 When the file holds several suites (a multi-package CLI run), or `match_suite` is set, only
 the entries of the suite named `suite_name` are loaded; otherwise a single-suite file is
 loaded regardless of its suite name. Entries recorded with an error are skipped.
+
+It loads the timings whatever build wrote them. `suite_run` also checks the report's
+optimization mode, OS, and architecture against the running program.
 */
 @(require_results)
 load_baseline_file :: proc(
@@ -274,6 +277,53 @@ load_baseline_file :: proc(
 	match_suite := false,
 ) -> Report_Error {
 	doc := read_json_report(path, context.temp_allocator) or_return
+	_fill_baseline_map(doc, out_map, allocator, suite_name, match_suite)
+	return nil
+}
+
+// The build settings a report was written with that change every timing in it.
+@(private)
+_Build_Settings :: struct {
+	optimization: string,
+	os:           string,
+	arch:         string,
+}
+
+@(private)
+_current_build :: proc() -> _Build_Settings {
+	return {fmt.tprintf("%v", ODIN_OPTIMIZATION_MODE), ODIN_OS_STRING, ODIN_ARCH_STRING}
+}
+
+@(private)
+_document_build :: proc(doc: Export_Document) -> _Build_Settings {
+	return {doc.optimization, doc.os, doc.arch}
+}
+
+// Reports whether timings from builds `a` and `b` can't be compared: their optimization mode,
+// OS, or architecture differ. A field that a report leaves empty is not held against it.
+@(private)
+_builds_differ :: proc(a, b: _Build_Settings) -> bool {
+	differ :: proc(x, y: string) -> bool {
+		return x != "" && y != "" && x != y
+	}
+	return differ(a.optimization, b.optimization) || differ(a.os, b.os) || differ(a.arch, b.arch)
+}
+
+// `-o:Speed darwin/arm64`, for warnings.
+@(private)
+_build_string :: proc(b: _Build_Settings) -> string {
+	return fmt.tprintf("-o:%s %s/%s", b.optimization, b.os, b.arch)
+}
+
+// Fills `out_map` from a report that has already been read (see `load_baseline_file`).
+@(private)
+_fill_baseline_map :: proc(
+	doc: Export_Document,
+	out_map: ^map[string]Stats,
+	allocator: runtime.Allocator,
+	suite_name := "",
+	match_suite := false,
+) {
 	filter_by_suite := suite_name != "" && (match_suite || _has_several_suites(doc.benchmarks))
 
 	for e in doc.benchmarks {
@@ -289,7 +339,6 @@ load_baseline_file :: proc(
 			out_map[strings.clone(e.full_name, allocator)] = st
 		}
 	}
-	return nil
 }
 
 /*

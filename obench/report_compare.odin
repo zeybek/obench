@@ -20,6 +20,9 @@ Comparison_Summary :: struct {
 	// Benchmarks that worked in the baseline but failed in the candidate.
 	errored:           int,
 	geomean_delta_pct: f64,
+	// The reports come from builds with a different optimization mode, OS, or architecture,
+	// so their timings can't be compared.
+	build_mismatch:    bool,
 }
 
 @(private = "file")
@@ -51,16 +54,16 @@ write_comparison :: proc(
 	}
 	several_suites := _has_several_suites(candidate.benchmarks)
 
-	if baseline.os != candidate.os || baseline.arch != candidate.arch {
+	if base_build, cand_build := _document_build(baseline), _document_build(candidate);
+	   _builds_differ(base_build, cand_build) {
+		summary.build_mismatch = true
 		fmt.wprintf(
 			w,
-			"%swarning:%s comparing %s/%s against %s/%s\n",
+			"%swarning:%s the baseline was built with %s and the candidate with %s; their timings can't be compared\n",
 			p.red,
 			p.reset,
-			baseline.os,
-			baseline.arch,
-			candidate.os,
-			candidate.arch,
+			_build_string(base_build),
+			_build_string(cand_build),
 		)
 	}
 
@@ -233,8 +236,9 @@ write_comparison :: proc(
 Compares two saved JSON reports in `benchstat` style and prints the result to stdout
 (see `write_comparison`).
 
-`passed` is `false` only when `fail_on_regression` is set and either something regressed or a
-benchmark that worked in the baseline failed in the candidate. Benchmarks missing from one
+`passed` is `false` only when `fail_on_regression` is set and something regressed, a
+benchmark that worked in the baseline failed in the candidate, or the two reports come from
+builds with a different optimization mode, OS, or architecture. Benchmarks missing from one
 side are listed but don't fail the comparison (a candidate run may use a filter).
 */
 @(require_results)
@@ -269,5 +273,6 @@ compare_baseline_files :: proc(
 	fmt.wprintln(out)
 	_, _ = os.write_string(os.stdout, strings.to_string(sb))
 
-	return !(fail_on_regression && (summary.regressions > 0 || summary.errored > 0)), nil
+	failed := summary.regressions > 0 || summary.errored > 0 || summary.build_mismatch
+	return !(fail_on_regression && failed), nil
 }

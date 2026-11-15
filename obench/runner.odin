@@ -441,13 +441,8 @@ _suite_execute :: proc(s: ^Suite) -> bool {
 
 	baseline_loaded := false
 	if s.config.baseline_load_path != "" {
-		if err := load_baseline_file(
-			s.config.baseline_load_path,
-			&baseline_map,
-			s.allocator,
-			s.name,
-			s.config.match_baseline_suite,
-		); err != nil {
+		if doc, err := read_json_report(s.config.baseline_load_path, context.temp_allocator);
+		   err != nil {
 			fmt.eprintfln(
 				"obench: could not read baseline '%s' (%v); continuing without comparison",
 				s.config.baseline_load_path,
@@ -455,7 +450,29 @@ _suite_execute :: proc(s: ^Suite) -> bool {
 			)
 			s.failed_io += 1
 		} else {
+			_fill_baseline_map(
+				doc,
+				&baseline_map,
+				s.allocator,
+				s.name,
+				s.config.match_baseline_suite,
+			)
 			baseline_loaded = true
+
+			// A baseline from another -o mode or platform turns every delta into noise, and one
+			// from an unoptimized build hides real regressions behind fake speedups.
+			if base, current := _document_build(doc), _current_build();
+			   _builds_differ(base, current) {
+				fmt.eprintfln(
+					"obench: warning: baseline '%s' was built with %s and this run with %s; their timings can't be compared",
+					s.config.baseline_load_path,
+					_build_string(base),
+					_build_string(current),
+				)
+				if s.config.fail_on_regression {
+					s.failed_io += 1
+				}
+			}
 		}
 	}
 

@@ -113,7 +113,8 @@ RUN OPTIONS:
       --save-baseline <file>     Save results as a JSON report (alias of --json)
       --threshold <pct>          Minimum median change counted as significant (default: 2.0)
       --fail-on-regression       Exit with status 1 if a benchmark regressed significantly,
-                                 or the baseline holds none of a suite's benchmarks
+                                 the baseline holds none of a suite's benchmarks, or it was
+                                 built with another -o mode, OS, or arch
       --json <file>              Write a JSON report
       --md <file>                Write a GitHub Markdown report
       --csv <file>               Write an RFC 4180 CSV report

@@ -75,6 +75,16 @@ set +e
 set -e
 [ "$code" -eq 1 ] || fail "expected compare to exit 1 for a 10x slowdown, got $code"
 
+step "a baseline from an -o:none build fails the gate instead of looking faster"
+"$OBENCH" "$WORK_N/regress" --collection "libs=$ROOT_N" -o none -n 10 -w 5 --no-color \
+  --save-baseline "$WORK_N/none.json" >/dev/null
+set +e
+"$OBENCH" "$WORK_N/regress" --collection "libs=$ROOT_N" -n 10 -w 5 --no-color \
+  --baseline "$WORK_N/none.json" --fail-on-regression >/dev/null 2> "$WORK/none_err.txt"; code=$?
+set -e
+[ "$code" -eq 1 ] || fail "expected exit 1 against a baseline from another -o mode, got $code"
+grep -q "can't be compared" "$WORK/none_err.txt" || fail "expected a warning about the baseline's build"
+
 step "packages that share a name get suites of their own"
 for dir in a b; do
   mkdir -p "$WORK/dup/$dir"

@@ -197,8 +197,11 @@ Against an older report without samples, Welch's t-test on the means is used ins
 `--fail-on-regression` turns regressions into exit status 1, which makes it usable as a CI
 gate. A baseline file that can't be read also fails the run, so a typo in the path doesn't
 pass silently. A baseline that holds none of a suite's benchmarks (a renamed suite, or the
-wrong file) prints a warning and fails the run under `--fail-on-regression`. `obench compare
---fail-on-regression` also fails when a benchmark that worked in the baseline reports an
+wrong file) prints a warning and fails the run under `--fail-on-regression`. So does a
+baseline built with another optimization mode, OS, or architecture, because its timings
+can't be compared: one saved from an `-o:none` build would make every benchmark look faster
+and hide a real regression. `obench compare` checks the two reports the same way. Its
+`--fail-on-regression` also fails when a benchmark that worked in the baseline reports an
 error in the candidate; benchmarks found on one side only are listed but don't fail it.
 
 A `--filter` that matches nothing writes no report files, so a typo can't replace a saved

@@ -803,6 +803,51 @@ test_missing_baseline_fails_the_run :: proc(t: ^testing.T) {
 	testing.expect_value(t, s.failed_io, 1)
 }
 
+// An optimization mode that isn't the one these tests were built with.
+@(private = "file")
+_other_optimization :: proc() -> string {
+	return ODIN_OPTIMIZATION_MODE == .None ? "Speed" : "None"
+}
+
+@(test)
+test_baseline_from_another_build_fails_the_gate :: proc(t: ^testing.T) {
+	path := ".obench_test_other_build.json"
+	defer _ = os.remove(path)
+
+	cfg := quick_config()
+	cfg.baseline_save_path = path
+	{
+		s := obench.suite_create("other_build", cfg)
+		defer obench.suite_destroy(&s)
+		obench.bench(&s, "noop", _noop_step)
+		testing.expect(t, obench.suite_run(&s))
+	}
+
+	// The same report, as if saved by a build with another -o mode.
+	doc, read_err := obench.read_json_report(path, context.temp_allocator)
+	testing.expect_value(t, read_err, nil)
+	doc.optimization = _other_optimization()
+	sb := strings.builder_make(context.temp_allocator)
+	testing.expect_value(t, obench.write_json_document(strings.to_writer(&sb), doc), nil)
+	testing.expect_value(t, os.write_entire_file(path, strings.to_string(sb)), nil)
+
+	cfg.baseline_save_path = ""
+	cfg.baseline_load_path = path
+	{
+		s := obench.suite_create("other_build", cfg)
+		defer obench.suite_destroy(&s)
+		obench.bench(&s, "noop", _noop_step)
+		testing.expect(t, obench.suite_run(&s), "without a gate the mismatch is only a warning")
+	}
+
+	cfg.fail_on_regression = true
+	s := obench.suite_create("other_build", cfg)
+	defer obench.suite_destroy(&s)
+	obench.bench(&s, "noop", _noop_step)
+	testing.expect(t, !obench.suite_run(&s), "a baseline from another build must fail the gate")
+	testing.expect_value(t, s.failed_io, 1)
+}
+
 @(test)
 test_merge_reports_and_filter_baseline_by_suite :: proc(t: ^testing.T) {
 	paths := [?]string{".obench_test_merge_a.json", ".obench_test_merge_b.json"}
@@ -1103,6 +1148,45 @@ test_comparison_counts_benchmarks_that_started_failing :: proc(t: ^testing.T) {
 	testing.expect_value(t, summary.errored, 1)
 	testing.expect_value(t, summary.only_in_baseline, 0)
 	testing.expect(t, strings.contains(strings.to_string(sb), "no_measurement"))
+}
+
+@(test)
+test_comparison_flags_reports_from_another_build :: proc(t: ^testing.T) {
+	entries := []obench.Export_Entry {
+		{suite_name = "s", full_name = "x", samples = 10, p50_ns = 10, mean_ns = 10},
+	}
+	speed := obench.Export_Document {
+		optimization = "Speed",
+		os           = "linux",
+		arch         = "amd64",
+		benchmarks   = entries,
+	}
+
+	sb := strings.builder_make(context.temp_allocator)
+	same := obench.write_comparison(strings.to_writer(&sb), speed, speed, 2.0, false)
+	testing.expect(t, !same.build_mismatch, "identical builds")
+
+	// Older reports may leave the fields empty; that alone is no mismatch.
+	unknown := speed
+	unknown.optimization = ""
+	unknown.os = ""
+	unknown.arch = ""
+	strings.builder_reset(&sb)
+	partial := obench.write_comparison(strings.to_writer(&sb), unknown, speed, 2.0, false)
+	testing.expect(t, !partial.build_mismatch, "empty build fields")
+
+	none := speed
+	none.optimization = "None"
+	strings.builder_reset(&sb)
+	other := obench.write_comparison(strings.to_writer(&sb), none, speed, 2.0, false)
+	testing.expect(t, other.build_mismatch, "-o:None against -o:Speed")
+	testing.expect(t, strings.contains(strings.to_string(sb), "-o:None linux/amd64"))
+
+	arm := speed
+	arm.arch = "arm64"
+	strings.builder_reset(&sb)
+	arch := obench.write_comparison(strings.to_writer(&sb), arm, speed, 2.0, false)
+	testing.expect(t, arch.build_mismatch, "arm64 against amd64")
 }
 
 @(test)
