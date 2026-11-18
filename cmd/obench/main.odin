@@ -54,6 +54,7 @@ CLI_Options :: struct {
 	threshold_pct:      f64,
 	zero_alloc:         bool,
 	untimed_allocs:     bool,
+	timed_allocs:       bool,
 	fail_on_regression: bool,
 	no_color:           bool,
 	no_histogram:       bool,
@@ -115,13 +116,16 @@ RUN OPTIONS:
   -n, --samples <count>          Samples per benchmark (default: 50)
   -w, --warmup <ms>              Warmup per benchmark in milliseconds (default: 40)
       --zero-alloc               Treat every benchmark as @zero_alloc
-      --untimed-allocs           Measure allocations in one untimed batch after sampling
+      --untimed-allocs           Count allocations in one untimed batch after sampling (default)
+      --timed-allocs             Count allocations in every timed sample, which adds the
+                                 counting to the time of benchmarks that allocate
       --baseline <file.json>     Compare against a saved report (each package with its own suite)
       --save-baseline <file>     Save results as a JSON report (alias of --json)
       --threshold <pct>          Minimum median change counted as significant (default: 2.0)
       --fail-on-regression       Exit with status 1 if a benchmark regressed significantly,
-                                 the baseline holds none of a suite's benchmarks, or it was
-                                 built with another -o mode, OS, or arch
+                                 the baseline holds none of a suite's benchmarks, it was
+                                 built with another -o mode, OS, or arch, or it counted
+                                 allocations the other way (see --timed-allocs)
       --json <file>              Write a JSON report
       --md <file>                Write a GitHub Markdown report
       --csv <file>               Write an RFC 4180 CSV report
@@ -172,6 +176,7 @@ _Cli_Flags :: struct {
 	spall:              string,
 	zero_alloc:         bool,
 	untimed_allocs:     bool,
+	timed_allocs:       bool,
 	fail_on_regression: bool,
 	no_color:           bool,
 	no_histogram:       bool,
@@ -294,6 +299,8 @@ parse_cli_args :: proc(
 		return opts, "--warmup expects a non-negative integer (milliseconds)"
 	case f.threshold <= 0:
 		return opts, "--threshold expects a positive number"
+	case f.untimed_allocs && f.timed_allocs:
+		return opts, "--untimed-allocs and --timed-allocs can't be used together"
 	}
 	if f.opt != "" {
 		switch f.opt {
@@ -342,6 +349,7 @@ parse_cli_args :: proc(
 	opts.spall_path = f.spall
 	opts.zero_alloc = f.zero_alloc
 	opts.untimed_allocs = f.untimed_allocs
+	opts.timed_allocs = f.timed_allocs
 	opts.fail_on_regression = f.fail_on_regression
 	opts.no_color = f.no_color
 	opts.no_histogram = f.no_histogram
@@ -1404,6 +1412,9 @@ _runtime_args :: proc(
 	}
 	if opts.untimed_allocs {
 		append(&args, "--untimed-allocs")
+	}
+	if opts.timed_allocs {
+		append(&args, "--timed-allocs")
 	}
 	if opts.fail_on_regression {
 		append(&args, "--fail-on-regression")

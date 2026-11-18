@@ -2,6 +2,7 @@ package obench_tests
 
 import obench "../obench"
 import "base:intrinsics"
+import "core:encoding/json"
 import "core:fmt"
 import "core:math"
 import "core:os"
@@ -21,6 +22,7 @@ quick_config :: proc() -> obench.Config {
 		sample_count = 10,
 		fixed_batch_size = 16,
 		reset_temp_per_iter = true,
+		untimed_alloc_check = obench.DEFAULT_UNTIMED_ALLOCS,
 		noise_threshold_pct = 2.0,
 		color_output = false,
 		show_histogram = true,
@@ -434,6 +436,9 @@ test_apply_args :: proc(t: ^testing.T) {
 	testing.expect_value(t, cfg.untimed_alloc_check, true)
 	testing.expect_value(t, cfg.json_export_path, "out.json")
 	testing.expect_value(t, cfg.show_histogram, false)
+
+	obench.apply_args(&cfg, []string{"--timed-allocs"})
+	testing.expect_value(t, cfg.untimed_alloc_check, false)
 }
 
 // ---------------------------------------------------------------------------
@@ -1419,4 +1424,145 @@ test_clock_calibration_uses_low_overhead_monotonic :: proc(t: ^testing.T) {
 			cal.overhead_ns,
 		)
 	}
+}
+
+// Counts the calls of `_allocs_in_the_second_sample`, so it allocates in one timed sample only.
+@(private = "file")
+g_rare_alloc_calls: int
+
+// With no warmup budget and a fixed batch size, call 1 is the warmup, calls 2 to 11 are the
+// timed samples, and call 12 is the untimed batch that counts allocations.
+@(private = "file")
+_allocs_in_the_second_sample :: proc(b: ^obench.Bencher) {
+	g_rare_alloc_calls += 1
+	allocate := g_rare_alloc_calls == 3
+	for obench.step(b) {
+		if allocate {
+			buf := make([]u8, 24)
+			obench.keep_alive(&buf)
+			delete(buf)
+			allocate = false
+		}
+	}
+	if (^bool)(b.user_ptr)^ {
+		obench.expect_zero_allocs(b)
+	}
+}
+
+@(test)
+test_default_counting_checks_zero_alloc_in_every_timed_sample :: proc(t: ^testing.T) {
+	testing.expect(t, obench.DEFAULT_UNTIMED_ALLOCS, "allocations are counted untimed by default")
+
+	cfg := quick_config()
+	cfg.untimed_alloc_check = true
+	cfg.warmup_time = 0
+	cfg.sample_count = 10
+	cfg.max_bench_time = 10 * time.Second
+
+	// Marked with `zero_alloc`, and with `expect_zero_allocs` inside the procedure.
+	for from_inside in ([2]bool{false, true}) {
+		from_inside := from_inside
+		g_rare_alloc_calls = 0
+		s := obench.suite_create("rare_alloc", cfg)
+		defer obench.suite_destroy(&s)
+		obench.bench(
+			&s,
+			"rare",
+			_allocs_in_the_second_sample,
+			zero_alloc = !from_inside,
+			user_ptr = &from_inside,
+		)
+		testing.expect(t, !obench.suite_run(&s), "an allocation in one timed sample must fail")
+		testing.expect_value(t, g_rare_alloc_calls, 12)
+		r := s.results[0]
+		testing.expect(t, r.zero_alloc_failed)
+		testing.expect_value(t, r.violation_size, 24)
+		testing.expect(t, r.violation_loc.line > 0)
+		// The untimed batch that counted didn't allocate.
+		testing.expect_value(t, r.stats.allocs_per_op, 0.0)
+	}
+}
+
+@(test)
+test_baseline_counted_the_other_way_fails_the_gate :: proc(t: ^testing.T) {
+	path := ".obench_test_alloc_counting.json"
+	defer _ = os.remove(path)
+
+	for allocating in ([2]bool{true, false}) {
+		cfg := quick_config()
+		cfg.untimed_alloc_check = false
+		cfg.baseline_save_path = path
+		{
+			s := obench.suite_create("alloc_counting", cfg)
+			defer obench.suite_destroy(&s)
+			obench.bench(&s, "work", _alloc_and_temp_and_resize if allocating else _noop_step)
+			testing.expect(t, obench.suite_run(&s))
+		}
+		doc, read_err := obench.read_json_report(path, context.temp_allocator)
+		testing.expect_value(t, read_err, nil)
+		testing.expect_value(t, doc.format_version, obench.REPORT_FORMAT_VERSION)
+		testing.expect_value(t, doc.untimed_allocs, false)
+
+		cfg.baseline_save_path = ""
+		cfg.baseline_load_path = path
+		cfg.untimed_alloc_check = true
+		cfg.fail_on_regression = true
+		cfg.noise_threshold_pct = 1e9 // Only the way of counting may fail the gate here.
+		s := obench.suite_create("alloc_counting", cfg)
+		defer obench.suite_destroy(&s)
+		obench.bench(&s, "work", _alloc_and_temp_and_resize if allocating else _noop_step)
+		if allocating {
+			testing.expect(t, !obench.suite_run(&s), "times with the counting in them can't gate")
+			testing.expect_value(t, s.failed_io, 1)
+		} else {
+			testing.expect(t, obench.suite_run(&s), "a benchmark that doesn't allocate can")
+			testing.expect_value(t, s.failed_io, 0)
+		}
+	}
+}
+
+@(test)
+test_comparison_flags_reports_that_counted_allocations_differently :: proc(t: ^testing.T) {
+	// A report without the field (format version 3 and older) counted in every timed sample.
+	old: obench.Export_Document
+	testing.expect_value(
+		t,
+		json.unmarshal_string(`{"format_version": 3, "benchmarks": []}`, &old),
+		nil,
+	)
+	testing.expect_value(t, old.untimed_allocs, false)
+
+	allocating := []obench.Export_Entry {
+		{
+			suite_name = "s",
+			full_name = "x",
+			samples = 10,
+			p50_ns = 10,
+			mean_ns = 10,
+			allocs_per_op = 1,
+		},
+	}
+	quiet := []obench.Export_Entry {
+		{suite_name = "s", full_name = "x", samples = 10, p50_ns = 10, mean_ns = 10},
+	}
+	timed := obench.Export_Document {
+		benchmarks = allocating,
+	}
+	untimed := timed
+	untimed.untimed_allocs = true
+
+	sb := strings.builder_make(context.temp_allocator)
+	same := obench.write_comparison(strings.to_writer(&sb), untimed, untimed, 2.0, false)
+	testing.expect(t, !same.alloc_counting_mismatch, "counted the same way")
+
+	strings.builder_reset(&sb)
+	other := obench.write_comparison(strings.to_writer(&sb), timed, untimed, 2.0, false)
+	testing.expect(t, other.alloc_counting_mismatch, "timed baseline against an untimed run")
+	testing.expect(t, strings.contains(strings.to_string(sb), "in every timed sample"))
+
+	timed.benchmarks = quiet
+	untimed.benchmarks = quiet
+	strings.builder_reset(&sb)
+	no_allocs := obench.write_comparison(strings.to_writer(&sb), timed, untimed, 2.0, false)
+	testing.expect(t, !no_allocs.alloc_counting_mismatch, "nothing allocates")
 }

@@ -8,6 +8,12 @@ import "core:time"
 /*
 Configuration for a benchmark suite.
 
+Start from `default_config` and change what you need: a field a struct literal leaves out is
+zero, and for `reset_temp_per_iter`, `untimed_alloc_check`, `color_output`, and
+`show_histogram` zero isn't the default. A literal without `untimed_alloc_check = true`
+counts allocations in every timed sample, which adds the counting to the time of benchmarks
+that allocate.
+
 `suite_create` copies every string field, so the strings only need to stay valid until
 `suite_create` returns.
 */
@@ -19,7 +25,7 @@ Config :: struct {
 	fixed_batch_size:     int, // 0 = auto-calibrate
 	reset_temp_per_iter:  bool, // Default: true (frees the benchmark's private temp arena after every sample batch)
 	enforce_zero_allocs:  bool, // Fail if heap allocations > 0 inside measured loop
-	untimed_alloc_check:  bool, // Default: DEFAULT_UNTIMED_ALLOCS (count allocations and check @zero_alloc in one untimed batch after sampling)
+	untimed_alloc_check:  bool, // Default: DEFAULT_UNTIMED_ALLOCS (true: count allocations in one untimed batch after sampling; false: in every timed sample)
 	fail_on_regression:   bool, // Fail suite if any benchmark regresses beyond noise_threshold_pct
 	filter:               string, // Substring filter on the full benchmark name
 	noise_threshold_pct:  f64, // Default: 2.0%
@@ -83,6 +89,8 @@ default_config :: proc() -> Config {
 	if val := os.get_env("OBENCH_UNTIMED_ALLOCS", context.temp_allocator);
 	   val == "1" || val == "true" {
 		cfg.untimed_alloc_check = true
+	} else if val == "0" || val == "false" {
+		cfg.untimed_alloc_check = false
 	}
 	if val := os.get_env("OBENCH_FAIL_ON_REGRESSION", context.temp_allocator);
 	   val == "1" || val == "true" {
@@ -129,8 +137,8 @@ default_config :: proc() -> Config {
 /*
 Applies obench command-line flags (`--filter`, `--samples`, `--warmup`, `--threshold`,
 `--baseline`, `--match-baseline-suite`, `--save-baseline`, `--json`, `--md`, `--csv`,
-`--spall`, `--zero-alloc`, `--untimed-allocs`, `--fail-on-regression`, `--no-color`,
-`--no-histogram`) to `cfg`.
+`--spall`, `--zero-alloc`, `--untimed-allocs`, `--timed-allocs`, `--fail-on-regression`,
+`--no-color`, `--no-histogram`) to `cfg`.
 
 Values may be given as `--flag value`, `--flag=value`, or `-flag:value`. Unknown arguments
 are ignored so programs can mix obench flags with their own. String values point into
@@ -150,6 +158,9 @@ apply_args :: proc(cfg: ^Config, args: []string) {
 			continue
 		case "--untimed-allocs", "-untimed-allocs":
 			cfg.untimed_alloc_check = true
+			continue
+		case "--timed-allocs", "-timed-allocs":
+			cfg.untimed_alloc_check = false
 			continue
 		case "--fail-on-regression", "-fail-on-regression":
 			cfg.fail_on_regression = true

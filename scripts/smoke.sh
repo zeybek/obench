@@ -85,6 +85,26 @@ set -e
 [ "$code" -eq 1 ] || fail "expected exit 1 against a baseline from another -o mode, got $code"
 grep -q "can't be compared" "$WORK/none_err.txt" || fail "expected a warning about the baseline's build"
 
+step "a baseline that counted allocations in every timed sample fails the gate"
+grep -q '"untimed_allocs": true' "$WORK/base.json" || fail "expected the default run to count allocations untimed"
+"$OBENCH" examples/allocators -n 8 -w 2 --no-color --timed-allocs \
+  --save-baseline "$WORK_N/timed.json" >/dev/null
+grep -q '"untimed_allocs": false' "$WORK/timed.json" || fail "expected --timed-allocs in the report"
+set +e
+"$OBENCH" examples/allocators -n 8 -w 2 --no-color \
+  --baseline "$WORK_N/timed.json" --fail-on-regression >/dev/null 2> "$WORK/timed_err.txt"; code=$?
+set -e
+[ "$code" -eq 1 ] || fail "expected exit 1 against a baseline counted in every timed sample, got $code"
+grep -q "counted allocations in every timed sample" "$WORK/timed_err.txt" ||
+  fail "expected a warning about how the baseline counted allocations"
+set +e
+"$OBENCH" compare "$WORK_N/timed.json" "$WORK_N/base.json" --fail-on-regression --no-color \
+  > "$WORK/timed_cmp.txt"; code=$?
+set -e
+[ "$code" -eq 1 ] || fail "expected compare to exit 1 across the two ways of counting, got $code"
+grep -q "counted allocations in every timed sample" "$WORK/timed_cmp.txt" ||
+  fail "expected compare to warn about how the baseline counted allocations"
+
 step "packages that share a name get suites of their own"
 for dir in a b; do
   mkdir -p "$WORK/dup/$dir"

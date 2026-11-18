@@ -111,8 +111,8 @@ start flag, so wake-up latency isn't measured.
 
 The time per operation is wall time divided by the total iteration count across all
 threads, so perfect scaling halves it each time the thread count doubles. Workers use the
-benchmark's `context.allocator` (the counting allocator while sampling), which means the
-allocator behind it has to be thread-safe (the default heap allocator is).
+benchmark's `context.allocator` (the counting allocator while allocations are counted),
+which means the allocator behind it has to be thread-safe (the default heap allocator is).
 
 Running benchmarks
 
@@ -176,10 +176,12 @@ resolution]` marks a benchmark whose sample is less than 100 clock ticks long (a
 
 `allocs / bytes` counts allocator calls that obtain memory, which includes resizes: building
 a 64-item dynamic array from capacity 16 shows `3.0 / 512 B` (one allocation, two resizes).
-Temp-only allocations show as `0 (tmp 3.0/512 B)`. `--untimed-allocs` leaves the counting
-allocator out of the timed samples and measures allocations in one untimed batch afterwards;
-because the counts and the `@zero_alloc` check come from that single batch, a rare allocation
-can slip through.
+Temp-only allocations show as `0 (tmp 3.0/512 B)`. The counts come from one more batch
+that runs untimed after the samples, so counting adds nothing to the measured time. A
+`@zero_alloc` benchmark still has its heap checked in every timed sample, which costs
+nothing until it allocates. `--timed-allocs` (or `OBENCH_UNTIMED_ALLOCS=0`) counts in every
+timed sample instead, and then benchmarks that allocate also pay for the counting: in
+`examples/allocators` on an M2, `heap` took 14% longer and `temp_allocator` 19% longer.
 
 On x86 there is also a `cycles` column with time-stamp counter ticks, which run at the CPU's
 nominal frequency. On other architectures `read_cycle_counter` reads a fixed-frequency timer
@@ -205,7 +207,11 @@ pass silently. A baseline that holds none of a suite's benchmarks (a renamed sui
 wrong file) prints a warning and fails the run under `--fail-on-regression`. So does a
 baseline built with another optimization mode, OS, or architecture, because its timings
 can't be compared: one saved from an `-o:none` build would make every benchmark look faster
-and hide a real regression. `obench compare` checks the two reports the same way. Its
+and hide a real regression. The same goes for a baseline that counted allocations the other
+way when it has a benchmark that allocates; reports older than format version 4 counted them
+in every timed sample, so against one of them those benchmarks look faster. Save the
+baseline again, or run with `--timed-allocs` until then. `obench compare` checks the two
+reports the same way. Its
 `--fail-on-regression` also fails when a benchmark that worked in the baseline reports an
 error in the candidate; benchmarks found on one side only are listed but don't fail it.
 
@@ -232,7 +238,7 @@ pick up these environment variables. Command-line flags of the same name overrid
 	OBENCH_SAMPLES, OBENCH_WARMUP_MS Sample count and warmup
 	OBENCH_THRESHOLD                 Same as --threshold
 	OBENCH_ZERO_ALLOC                1 or true to enable
-	OBENCH_UNTIMED_ALLOCS            1 or true (same as --untimed-allocs)
+	OBENCH_UNTIMED_ALLOCS            0 or false: same as --timed-allocs
 	OBENCH_FAIL_ON_REGRESSION        1 or true to enable
 	OBENCH_BASELINE                  Baseline to compare against
 	OBENCH_SAVE_BASELINE             Where to save one
@@ -253,8 +259,8 @@ Compile-time defaults can be changed with `-define`:
 	DEFAULT_MAX_BENCH_MS  : int    : #config(OBENCH_MAX_BENCH_MS,  1200)
 	// Enforce zero heap allocations globally across all benchmarks.
 	DEFAULT_ZERO_ALLOC    : bool   : #config(OBENCH_ZERO_ALLOC,    false)
-	// Measure allocations in a single untimed pass after timed samples.
-	DEFAULT_UNTIMED_ALLOCS: bool   : #config(OBENCH_UNTIMED_ALLOCS, false)
+	// Count allocations in one untimed batch after the timed samples.
+	DEFAULT_UNTIMED_ALLOCS: bool   : #config(OBENCH_UNTIMED_ALLOCS, true)
 	// Enable ANSI color output in terminal reports.
 	DEFAULT_COLOR         : bool   : #config(OBENCH_COLOR,         true)
 	// Render 8-bin Unicode distribution sparklines in terminal reports.
@@ -340,8 +346,8 @@ DEFAULT_MIN_SAMPLE_US: int : #config(OBENCH_MIN_SAMPLE_US, 1000)
 DEFAULT_MAX_BENCH_MS: int : #config(OBENCH_MAX_BENCH_MS, 1200)
 // Enforce zero heap allocations globally across all benchmarks.
 DEFAULT_ZERO_ALLOC: bool : #config(OBENCH_ZERO_ALLOC, false)
-// Measure allocations in a single untimed pass after timed samples.
-DEFAULT_UNTIMED_ALLOCS: bool : #config(OBENCH_UNTIMED_ALLOCS, false)
+// Count allocations in one untimed batch after the timed samples.
+DEFAULT_UNTIMED_ALLOCS: bool : #config(OBENCH_UNTIMED_ALLOCS, true)
 // Enable ANSI color output in terminal reports.
 DEFAULT_COLOR: bool : #config(OBENCH_COLOR, true)
 // Render 8-bin Unicode distribution sparklines in terminal reports.

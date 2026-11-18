@@ -39,7 +39,14 @@ test_parse_cli_args_run_options :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(opts.collections), 1)
 	testing.expect_value(t, opts.zero_alloc, true)
 	testing.expect_value(t, opts.untimed_allocs, true)
+	testing.expect_value(t, opts.timed_allocs, false)
 	testing.expect_value(t, opts.json_path, "out.json")
+
+	timed, timed_err := parse_cli_args({"run", "examples", "--timed-allocs"})
+	defer destroy_cli_options(&timed)
+	testing.expect_value(t, timed_err, "")
+	testing.expect_value(t, timed.timed_allocs, true)
+	testing.expect_value(t, timed.untimed_allocs, false)
 }
 
 @(test)
@@ -59,6 +66,7 @@ test_parse_cli_args_rejects_bad_input :: proc(t: ^testing.T) {
 		{"-f", "a", "--filter", "b"},
 		{"-w", "1", "--warmup", "2"},
 		{"-o", "none", "--opt", "speed"},
+		{"--untimed-allocs", "--timed-allocs"},
 	}
 	for args in bad_inputs {
 		opts, err := parse_cli_args(args)

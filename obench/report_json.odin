@@ -14,9 +14,10 @@ Version of the JSON report layout. Bumped whenever the layout changes. Readers a
 versions; fields that are missing stay zero.
 
 Version 3 added `samples_ns` (every sample's time per operation) to each benchmark and
-`intercept` to each complexity fit.
+`intercept` to each complexity fit. Version 4 added `untimed_allocs`: `false`, or missing in
+an older report, means allocations were counted in every timed sample.
 */
-REPORT_FORMAT_VERSION :: 3
+REPORT_FORMAT_VERSION :: 4
 
 /*
 Serializable record for a single benchmark in a JSON baseline or export file.
@@ -81,6 +82,7 @@ Export_Document :: struct {
 	suite_name:     string `json:"suite_name"`,
 	os:             string `json:"os"`,
 	arch:           string `json:"arch"`,
+	untimed_allocs: bool `json:"untimed_allocs"`,
 	geomean_ns:     f64 `json:"geomean_ns"`,
 	benchmarks:     []Export_Entry `json:"benchmarks"`,
 	complexities:   []Export_Complexity `json:"complexities,omitempty"`,
@@ -154,6 +156,7 @@ export_document :: proc(
 		suite_name = s.name,
 		os = ODIN_OS_STRING,
 		arch = ODIN_ARCH_STRING,
+		untimed_allocs = s.config.untimed_alloc_check,
 		geomean_ns = s.summary.geomean_ns,
 		benchmarks = entries,
 		complexities = comp_entries,
@@ -321,6 +324,29 @@ _build_string :: proc(b: _Build_Settings) -> string {
 	return fmt.tprintf("-o:%s %s/%s", b.optimization, b.os, b.arch)
 }
 
+/*
+Reports whether a benchmark with these counts takes longer when allocations are counted in
+every timed sample (see `Config.untimed_alloc_check`): counting adds its cost to every
+allocator call. A benchmark that doesn't allocate takes the same time either way, so only
+reports with one that allocates can't be compared across the two ways of counting.
+*/
+@(private)
+_allocates :: proc "contextless" (allocs_per_op, resizes_per_op, temp_allocs_per_op: f64) -> bool {
+	return allocs_per_op > 0 || resizes_per_op > 0 || temp_allocs_per_op > 0
+}
+
+// `in every timed sample` or `in one untimed batch`, for warnings.
+@(private)
+_alloc_counting_string :: proc(untimed: bool) -> string {
+	return "in one untimed batch" if untimed else "in every timed sample"
+}
+
+// The flag that makes a run count allocations the way a report with `untimed` did.
+@(private)
+_alloc_counting_flag :: proc(untimed: bool) -> string {
+	return "--untimed-allocs" if untimed else "--timed-allocs"
+}
+
 // Fills `out_map` from a report that has already been read (see `load_baseline_file`).
 @(private)
 _fill_baseline_map :: proc(
@@ -387,19 +413,29 @@ merge_json_reports :: proc(input_paths: []string, output_path: string) -> Report
 		doc := read_json_report(path, context.temp_allocator) or_return
 		if i == 0 {
 			first = doc
-		} else if doc.odin_version != first.odin_version ||
-		   doc.optimization != first.optimization ||
-		   doc.os != first.os ||
-		   doc.arch != first.arch {
-			fmt.eprintfln(
-				"obench: warning: '%s' was built with Odin %s -o:%s for %s/%s, unlike '%s'",
-				path,
-				doc.odin_version,
-				doc.optimization,
-				doc.os,
-				doc.arch,
-				input_paths[0],
-			)
+		} else {
+			if doc.odin_version != first.odin_version ||
+			   doc.optimization != first.optimization ||
+			   doc.os != first.os ||
+			   doc.arch != first.arch {
+				fmt.eprintfln(
+					"obench: warning: '%s' was built with Odin %s -o:%s for %s/%s, unlike '%s'",
+					path,
+					doc.odin_version,
+					doc.optimization,
+					doc.os,
+					doc.arch,
+					input_paths[0],
+				)
+			}
+			if doc.untimed_allocs != first.untimed_allocs {
+				fmt.eprintfln(
+					"obench: warning: '%s' counted allocations %s, unlike '%s'",
+					path,
+					_alloc_counting_string(doc.untimed_allocs),
+					input_paths[0],
+				)
+			}
 		}
 		append(&entries, ..doc.benchmarks)
 		append(&complexities, ..doc.complexities)
@@ -409,10 +445,11 @@ merge_json_reports :: proc(input_paths: []string, output_path: string) -> Report
 	}
 	if len(input_paths) == 0 {
 		first = Export_Document {
-			odin_version = ODIN_VERSION,
-			optimization = fmt.tprintf("%v", ODIN_OPTIMIZATION_MODE),
-			os           = ODIN_OS_STRING,
-			arch         = ODIN_ARCH_STRING,
+			odin_version   = ODIN_VERSION,
+			optimization   = fmt.tprintf("%v", ODIN_OPTIMIZATION_MODE),
+			os             = ODIN_OS_STRING,
+			arch           = ODIN_ARCH_STRING,
+			untimed_allocs = DEFAULT_UNTIMED_ALLOCS,
 		}
 	}
 
@@ -433,6 +470,7 @@ merge_json_reports :: proc(input_paths: []string, output_path: string) -> Report
 		suite_name     = strings.join(suite_names[:], ", ", context.temp_allocator),
 		os             = first.os,
 		arch           = first.arch,
+		untimed_allocs = first.untimed_allocs,
 		geomean_ns     = count > 0 ? math.exp(log_sum / f64(count)) : 0,
 		benchmarks     = entries[:],
 		complexities   = complexities[:],

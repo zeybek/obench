@@ -11,18 +11,21 @@ import "core:text/table"
 Counts from comparing two reports with `write_comparison`.
 */
 Comparison_Summary :: struct {
-	matched:           int,
-	improvements:      int,
-	regressions:       int,
-	unchanged:         int,
-	only_in_baseline:  int,
-	only_in_candidate: int,
+	matched:                 int,
+	improvements:            int,
+	regressions:             int,
+	unchanged:               int,
+	only_in_baseline:        int,
+	only_in_candidate:       int,
 	// Benchmarks that worked in the baseline but failed in the candidate.
-	errored:           int,
-	geomean_delta_pct: f64,
+	errored:                 int,
+	geomean_delta_pct:       f64,
 	// The reports come from builds with a different optimization mode, OS, or architecture,
 	// so their timings can't be compared.
-	build_mismatch:    bool,
+	build_mismatch:          bool,
+	// The reports counted allocations differently (see `Config.untimed_alloc_check`) and the
+	// baseline has a benchmark that allocates, whose times therefore can't be compared.
+	alloc_counting_mismatch: bool,
 }
 
 @(private = "file")
@@ -65,6 +68,25 @@ write_comparison :: proc(
 			_build_string(base_build),
 			_build_string(cand_build),
 		)
+	}
+	if baseline.untimed_allocs != candidate.untimed_allocs {
+		for &e in baseline.benchmarks {
+			if e.error == "" &&
+			   _allocates(e.allocs_per_op, e.resizes_per_op, e.temp_allocs_per_op) {
+				summary.alloc_counting_mismatch = true
+				break
+			}
+		}
+		if summary.alloc_counting_mismatch {
+			fmt.wprintf(
+				w,
+				"%swarning:%s the baseline counted allocations %s and the candidate %s; the times of benchmarks that allocate can't be compared\n",
+				p.red,
+				p.reset,
+				_alloc_counting_string(baseline.untimed_allocs),
+				_alloc_counting_string(candidate.untimed_allocs),
+			)
+		}
 	}
 
 	rt: _Report_Table
@@ -237,8 +259,9 @@ Compares two saved JSON reports in `benchstat` style and prints the result to st
 (see `write_comparison`).
 
 `passed` is `false` only when `fail_on_regression` is set and something regressed, a
-benchmark that worked in the baseline failed in the candidate, or the two reports come from
-builds with a different optimization mode, OS, or architecture. Benchmarks missing from one
+benchmark that worked in the baseline failed in the candidate, the two reports come from
+builds with a different optimization mode, OS, or architecture, or they counted allocations
+differently while the baseline has a benchmark that allocates. Benchmarks missing from one
 side are listed but don't fail the comparison (a candidate run may use a filter).
 */
 @(require_results)
@@ -273,6 +296,10 @@ compare_baseline_files :: proc(
 	fmt.wprintln(out)
 	_, _ = os.write_string(os.stdout, strings.to_string(sb))
 
-	failed := summary.regressions > 0 || summary.errored > 0 || summary.build_mismatch
+	failed :=
+		summary.regressions > 0 ||
+		summary.errored > 0 ||
+		summary.build_mismatch ||
+		summary.alloc_counting_mismatch
 	return !(fail_on_regression && failed), nil
 }

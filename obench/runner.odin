@@ -231,6 +231,8 @@ _execute_entry :: proc(
 			if br.error != .None {
 				return _fail_entry(s, &result, br.error)
 			}
+			// `expect_zero_allocs` inside the procedure is only seen once it has run.
+			expect_zero = expect_zero || br.expect_zero
 			warmup_elapsed += max(br.ns, 1)
 			if warmup_elapsed >= warmup_budget {
 				break
@@ -299,6 +301,17 @@ _execute_entry :: proc(
 	temp_counter: Counting_Allocator
 	counting_allocator_init(&heap_counter, context.allocator)
 	counting_allocator_init(&temp_counter, runtime.arena_allocator(temp_arena))
+	// With `untimed_alloc_check`, a benchmark that expects zero allocations still has its
+	// heap watched in every timed sample. That costs nothing until it allocates, and then
+	// the benchmark fails anyway.
+	zero_check: Counting_Allocator
+	counting_allocator_init(&zero_check, context.allocator)
+	sample_heap_counter: ^Counting_Allocator = &heap_counter
+	sample_temp_counter: ^Counting_Allocator = &temp_counter
+	if cfg.untimed_alloc_check {
+		sample_heap_counter = &zero_check if expect_zero else nil
+		sample_temp_counter = nil
+	}
 
 	total_iters: u64 = 0
 	max_bench_ns := i64(cfg.max_bench_time)
@@ -322,8 +335,7 @@ _execute_entry :: proc(
 			intrinsics.atomic_store_explicit(&heap_counter.current_bytes, 0, .Relaxed)
 		}
 		spall_begin(spall_rec, "sample", batch_arg)
-		br :=
-			_run_batch(&info, batch_size, nil, nil) if cfg.untimed_alloc_check else _run_batch(&info, batch_size, &heap_counter, &temp_counter)
+		br := _run_batch(&info, batch_size, sample_heap_counter, sample_temp_counter)
 		spall_end(spall_rec)
 
 		_store_batch_custom_metrics(&last_custom, &last_custom_count, &br, s.allocator)
@@ -403,11 +415,13 @@ _execute_entry :: proc(
 	}
 
 	result.stats = st
-	result.zero_alloc_failed = expect_zero && heap_counter.zero_alloc_violated
+	// The timed samples ran first, so their violation is the first one.
+	violation := &zero_check if zero_check.zero_alloc_violated else &heap_counter
+	result.zero_alloc_failed = expect_zero && violation.zero_alloc_violated
 	if result.zero_alloc_failed {
 		s.failed_zero_alloc += 1
-		result.violation_loc = heap_counter.first_violation_loc
-		result.violation_size = heap_counter.first_violation_size
+		result.violation_loc = violation.first_violation_loc
+		result.violation_size = violation.first_violation_size
 	}
 	return result
 }
@@ -554,6 +568,30 @@ _suite_execute :: proc(s: ^Suite) -> bool {
 				)
 				if s.config.fail_on_regression {
 					s.failed_io += 1
+				}
+			}
+
+			// Counting allocations in every timed sample makes the benchmarks that allocate
+			// slower, so a baseline counted the other way shows fake speedups or slowdowns.
+			if untimed := s.config.untimed_alloc_check; doc.untimed_allocs != untimed {
+				baseline_allocates := false
+				for _, st in baseline_map {
+					if _allocates(st.allocs_per_op, st.resizes_per_op, st.temp_allocs_per_op) {
+						baseline_allocates = true
+						break
+					}
+				}
+				if baseline_allocates {
+					fmt.eprintfln(
+						"obench: warning: baseline '%s' counted allocations %s and this run %s; the times of benchmarks that allocate can't be compared (save the baseline again, or run with %s)",
+						s.config.baseline_load_path,
+						_alloc_counting_string(doc.untimed_allocs),
+						_alloc_counting_string(untimed),
+						_alloc_counting_flag(doc.untimed_allocs),
+					)
+					if s.config.fail_on_regression {
+						s.failed_io += 1
+					}
 				}
 			}
 		}
