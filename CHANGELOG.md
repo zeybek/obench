@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.3.0](https://github.com/zeybek/obench/compare/v0.2.1...v0.3.0) (2026-11-18)
+
+
+### ⚠ BREAKING CHANGES
+
+* count allocations outside the timed samples by default ([#20](https://github.com/zeybek/obench/issues/20))
+
+### Features
+
+* add silent suite_execute API and preserve custom_metrics in baselines ([#17](https://github.com/zeybek/obench/issues/17)) ([f6e8243](https://github.com/zeybek/obench/commit/f6e82438d695c9cafd6bb58aec280b8d4b4b9f15))
+* add untimed allocation counting option (--untimed-allocs) ([#15](https://github.com/zeybek/obench/issues/15)) ([3387a08](https://github.com/zeybek/obench/commit/3387a0848b79aff52436ccbd02855d89e843cc70))
+* **cli:** add --extra-linker-flags, --custom-attribute, and --ols ([#16](https://github.com/zeybek/obench/issues/16)) ([3f199a8](https://github.com/zeybek/obench/commit/3f199a80a1b07dfbc80ee5640e03cdbae7aa3fdf))
+
+
+### Bug Fixes
+
+* count allocations outside the timed samples by default ([#20](https://github.com/zeybek/obench/issues/20)) ([74bc973](https://github.com/zeybek/obench/commit/74bc973a387b966c95c4903c6110af9e7f39ed48))
+
+
+### Performance Improvements
+
+* use libc vDSO clock_gettime on Linux ([#14](https://github.com/zeybek/obench/issues/14)) ([5a25b0d](https://github.com/zeybek/obench/commit/5a25b0d4864a39345d02451d56a05ff6f5e4ad9d))
+
 ## [0.2.1](https://github.com/zeybek/obench/compare/v0.2.0...v0.2.1) (2026-11-15)
 
 
