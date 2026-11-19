@@ -1833,3 +1833,72 @@ test_samples_batch_ns_json_roundtrip_and_v4_compat :: proc(t: ^testing.T) {
 		"samples_batch_ns up to max(i64) should be preserved",
 	)
 }
+
+@(private = "file")
+_pause_every_iteration :: proc(b: ^obench.Bencher) {
+	x := 0
+	for obench.step(b) {
+		obench.pause(b)
+		x = obench.black_box(x)
+		obench.resume(b)
+		x += obench.black_box(3)
+	}
+	_ = obench.black_box(x)
+}
+
+@(test)
+test_a_plain_step_loop_has_one_window_and_no_overhead_notes :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	cfg := quick_config()
+	cfg.fixed_batch_size = 0 // calibrated up to min_sample_time, far above the clock overhead
+	s := obench.suite_create("plain_windows", cfg)
+	defer obench.suite_destroy(&s)
+	obench.bench(&s, "plain", _noop_step)
+	testing.expect(t, obench.suite_run(&s))
+	if !testing.expect_value(t, len(s.results), 1) {
+		return
+	}
+	st := s.results[0].stats
+	testing.expect_value(t, st.windows_per_sample, 1.0)
+	testing.expect_value(t, st.clamped_samples, 0)
+	testing.expectf(
+		t,
+		st.overhead_share < 0.1,
+		"overhead_share %v should be small",
+		st.overhead_share,
+	)
+
+	sb := strings.builder_make(context.temp_allocator)
+	obench.write_terminal_report(strings.to_writer(&sb), &s)
+	report := strings.to_string(sb)
+	testing.expect(t, !strings.contains(report, "[clamped"), report)
+	testing.expect(t, !strings.contains(report, "[overhead-dominated]"), report)
+}
+
+@(test)
+test_samples_below_the_clock_overhead_are_reported_as_clamped :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	cfg := quick_config()
+	s := obench.suite_create("clamped", cfg)
+	defer obench.suite_destroy(&s)
+	obench.bench(&s, "paused", _pause_every_iteration)
+	// No window takes a second, so with this overhead every sample is clamped to 0, the way a
+	// real overhead above a tiny window clamps it.
+	s.clock.overhead_ns = 1e9
+	testing.expect(t, obench.suite_run(&s))
+	if !testing.expect_value(t, len(s.results), 1) {
+		return
+	}
+	st := s.results[0].stats
+	testing.expect_value(t, st.clamped_samples, st.samples)
+	testing.expect_value(t, st.overhead_share, 1.0)
+	// One window from `step`, then one more for every `resume` in the batch.
+	testing.expect_value(t, st.windows_per_sample, f64(cfg.fixed_batch_size + 1))
+	testing.expect_value(t, st.p50_ns, 0.0)
+
+	sb := strings.builder_make(context.temp_allocator)
+	obench.write_terminal_report(strings.to_writer(&sb), &s)
+	report := strings.to_string(sb)
+	note := fmt.tprintf("[clamped: %d/%d samples]", st.samples, st.samples)
+	testing.expectf(t, strings.contains(report, note), "expected %q in:\n%s", note, report)
+}

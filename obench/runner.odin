@@ -331,6 +331,8 @@ _execute_entry :: proc(
 
 	arg_buf: [48]u8
 	batch_arg := fmt.bprintf(arg_buf[:], "batch=%d", batch_size)
+	clamped_samples := 0
+	overhead_share_sum, windows_sum: f64
 	sampling_start := time.tick_now()
 	for i := 0; i < sample_target; i += 1 {
 		// Peak live bytes are tracked per sample.
@@ -355,7 +357,17 @@ _execute_entry :: proc(
 
 		// A sample below the clock overhead is clamped to 0: the work is too small to see.
 		windows := f64(max(br.windows, 1))
-		adj_ns := max(f64(br.ns) - s.clock.overhead_ns * windows, 0)
+		overhead_ns := s.clock.overhead_ns * windows
+		if f64(br.ns) < overhead_ns {
+			clamped_samples += 1
+		}
+		if br.ns > 0 {
+			overhead_share_sum += min(overhead_ns / f64(br.ns), 1)
+		} else {
+			overhead_share_sum += 1
+		}
+		windows_sum += windows
+		adj_ns := max(f64(br.ns) - overhead_ns, 0)
 		adj_cyc := max(f64(br.cycles) - s.clock.overhead_cycles * windows, 0)
 
 		adj_batch_ns := u64(math.round(adj_ns))
@@ -404,6 +416,11 @@ _execute_entry :: proc(
 	)
 	st.samples_ns = slice.clone(ns_samples[:], s.allocator)
 	st.samples_batch_ns = slice.clone(batch_samples[:], s.allocator)
+	if n := len(ns_samples); n > 0 {
+		st.clamped_samples = clamped_samples
+		st.windows_per_sample = windows_sum / f64(n)
+		st.overhead_share = overhead_share_sum / f64(n)
+	}
 	last_custom_count = 0 // Ownership of the unit strings moves to the result.
 
 	// A `free` that doesn't pass the block's size never lowered the live bytes, so the peak

@@ -171,8 +171,15 @@ operation. `x faster` and `x slower` compare each benchmark with the first one i
 for the same parameter, and only appear when the Mann-Whitney U test finds the difference
 significant and it is above 3%. Smaller or noisy differences show as `~1.04x (noise)`. The
 sparkline is a histogram of the samples between the fastest and p99. `[near timer
-resolution]` marks a benchmark whose sample is less than 100 clock ticks long (an expensive
-`iter_batched` setup can cut calibration short), so its times are quantized by 1% or more.
+resolution]` marks a benchmark whose timed windows are less than 100 clock ticks long (an
+expensive `iter_batched` setup can cut calibration short, and every `pause`/`resume` pair
+starts a new window), so its times are quantized by 1% or more.
+
+Every timed window also costs one clock overhead, which obench subtracts from the sample.
+`[clamped: 4/50 samples]` means 4 samples came out below that overhead and were counted as 0,
+so the times shown are too low, and `[overhead-dominated]` means the overhead was more than
+10% of the raw time. Both usually come from calling `pause`/`resume` around work that is
+smaller than the clock itself: time a bigger piece of work, or move the setup out of the loop.
 
 `allocs / bytes` counts allocator calls that obtain memory, which includes resizes: building
 a 64-item dynamic array from capacity 16 shows `3.0 / 512 B` (one allocation, two resizes).

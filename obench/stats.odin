@@ -71,6 +71,15 @@ Stats :: struct {
 	// untimed batch that records the size of every block.
 	peak_heap_bytes:      i64,
 
+	// How much of the measured time was the clock itself. Each timed window (one per sample in
+	// a plain `step` loop, plus one per `pause`/`resume` pair) costs one clock overhead, which
+	// is subtracted from the sample. `clamped_samples` counts samples that came out below that
+	// overhead and were set to 0. `overhead_share` is the average share of a sample's raw time
+	// that was overhead, from 0 to 1. `compute_stats` leaves all three at 0.
+	clamped_samples:      int,
+	windows_per_sample:   f64,
+	overhead_share:       f64,
+
 	// Custom user metrics
 	custom_metrics:       [MAX_CUSTOM_METRICS]Custom_Metric,
 	custom_metrics_count: int,

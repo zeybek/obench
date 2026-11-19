@@ -325,8 +325,25 @@ _notes_cell :: proc(s: ^Suite, r: Result, p: _Palette) -> string {
 		}
 	}
 
-	// A sample window within 100 ticks of the clock is quantized by at least 1%.
-	window_ns := r.stats.p50_ns * f64(max(r.stats.batch_size, 1))
+	// A sample below the clock overhead of its windows became 0, so the time shown is too low,
+	// and one where the overhead is most of the raw time leans on how well it was calibrated.
+	if r.stats.clamped_samples > 0 {
+		fmt.sbprintf(
+			&sb,
+			"%s[clamped: %d/%d samples]%s ",
+			p.yellow,
+			r.stats.clamped_samples,
+			r.stats.samples,
+			p.reset,
+		)
+	} else if r.stats.overhead_share > 0.1 {
+		fmt.sbprintf(&sb, "%s[overhead-dominated]%s ", p.yellow, p.reset)
+	}
+
+	// A timed window within 100 ticks of the clock is quantized by at least 1%. A sample has one
+	// window per `pause`/`resume` pair plus one, so the window, not the sample, is what counts.
+	window_ns :=
+		r.stats.p50_ns * f64(max(r.stats.batch_size, 1)) / max(r.stats.windows_per_sample, 1)
 	if s.clock.resolution_ns > 0 && window_ns > 0 && window_ns < 100 * s.clock.resolution_ns {
 		fmt.sbprintf(&sb, "%s[near timer resolution]%s ", p.yellow, p.reset)
 	}
