@@ -24,7 +24,7 @@ The [package documentation](https://zeybek.github.io/obench/obench/) covers the 
 
 ## Getting Started
 
-obench needs Odin `dev-2026-10` or newer. CI tests it on Linux (x86 and ARM), macOS (ARM and Intel), and Windows against the latest Odin release and the nightly build.
+obench needs Odin `dev-2026-10` or newer. CI tests it on Linux (x86 and ARM), macOS (ARM and Intel), and Windows against the latest Odin release and the nightly build, and on Linux against `dev-2026-10` itself.
 
 1. Copy the `obench` folder of this repository into your project, for example as `libs/obench`. Each [release](https://github.com/zeybek/obench/releases) has it as `obench-<tag>-library.tar.gz` and `.zip`, together with the license.
 

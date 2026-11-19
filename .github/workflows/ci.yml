@@ -36,6 +36,11 @@ jobs:
           # Odin publishes no nightly build for Intel macOS.
           - os: macos-15-intel
             odin: nightly
+        include:
+          # The oldest Odin release the README and CONTRIBUTING.md say obench works with. Change
+          # all three together.
+          - os: ubuntu-latest
+            odin: dev-2026-10
 
     defaults:
       run:
