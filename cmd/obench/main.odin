@@ -1684,6 +1684,12 @@ run_package :: proc(
 
 	append(&cmd, fmt.tprintf("-out:%s", exe_path), fmt.tprintf("-o:%s", opts.opt_mode))
 	ols_added, ols_path := append_compiler_flags(&cmd, pkg.dir_path, opts)
+	{
+		collections := make([dynamic]string, context.temp_allocator)
+		append(&collections, ..opts.collections[:])
+		append(&collections, ..ols_added[:])
+		warn_on_library_version_mismatch(pkg.lib_import, pkg.dir_path, collections[:])
+	}
 	if len(ols_added) > 0 && (reported_ols == nil || ols_path not_in reported_ols^) {
 		if reported_ols != nil {
 			reported_ols^[ols_path] = true

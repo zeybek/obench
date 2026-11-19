@@ -62,7 +62,7 @@ obench needs Odin `dev-2026-10` or newer. CI tests it on Linux (x86 and ARM), ma
     }
     ```
 
-3. Build the CLI from a clone of this repository (on Windows, use `-out:bin/obench.exe`), or take a prebuilt one from a release (it still needs `odin` on `PATH`), and run it on your project:
+3. Build the CLI from a clone of this repository (on Windows, use `-out:bin/obench.exe`), or take a prebuilt one from a release (it still needs `odin` on `PATH`, and it warns when the library you vendored is another version), and run it on your project:
 
     ```sh
     mkdir -p bin
