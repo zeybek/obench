@@ -248,6 +248,10 @@ pick up these environment variables. Command-line flags of the same name overrid
 	OBENCH_CSV                       Report path
 	OBENCH_SPALL                     Trace path
 	OBENCH_NO_COLOR, NO_COLOR        Disable colors
+	FORCE_COLOR                      Keep colors when the output isn't a terminal
+
+Colors are also off when standard output isn't a terminal, such as a file, a pipe, or a CI
+log, unless `FORCE_COLOR` is set to anything but `0`.
 
 Compile-time defaults can be changed with `-define`:
 

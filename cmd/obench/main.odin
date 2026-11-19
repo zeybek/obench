@@ -130,7 +130,8 @@ RUN OPTIONS:
       --md <file>                Write a GitHub Markdown report
       --csv <file>               Write an RFC 4180 CSV report
       --spall <file>             Write a core:prof/spall trace (one file per package)
-      --no-color                 Disable ANSI colors (NO_COLOR is honored too)
+      --no-color                 Disable ANSI colors. They are also off when NO_COLOR is set
+                                 or the output isn't a terminal (FORCE_COLOR=1 keeps them)
       --no-histogram             Hide distribution sparklines
 
 BUILD OPTIONS (forwarded to the Odin compiler):
@@ -2001,7 +2002,7 @@ main :: proc() {
 			opts.compare_old,
 			opts.compare_new,
 			opts.threshold_pct,
-			!opts.no_color,
+			!opts.no_color && obench.stdout_wants_color(),
 			opts.fail_on_regression,
 		)
 		if err != nil {

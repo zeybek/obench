@@ -43,6 +43,26 @@ Config :: struct {
 }
 
 /*
+Reports whether output to standard output should use ANSI colors. `NO_COLOR` (any value, see
+https://no-color.org) or `OBENCH_NO_COLOR=1` turns them off. Otherwise colors are on when
+standard output is a terminal, or when `FORCE_COLOR` is set to anything but `0`, for a pager
+such as `less -R`. `default_config` uses it for `color_output`, and the CLI for `compare`.
+*/
+@(require_results)
+stdout_wants_color :: proc() -> bool {
+	if val := os.get_env("OBENCH_NO_COLOR", context.temp_allocator); val == "1" || val == "true" {
+		return false
+	}
+	if val := os.get_env("NO_COLOR", context.temp_allocator); len(val) > 0 {
+		return false
+	}
+	if val := os.get_env("FORCE_COLOR", context.temp_allocator); len(val) > 0 && val != "0" {
+		return true
+	}
+	return os.is_tty(os.stdout)
+}
+
+/*
 Returns the default benchmark configuration, applying `#config(OBENCH_*)` constants,
 `OBENCH_*` environment variables, and (outside of `odin test`) command-line flags such as
 `--filter` or `--samples`.
@@ -101,11 +121,7 @@ default_config :: proc() -> Config {
 			cfg.noise_threshold_pct = f
 		}
 	}
-	if val := os.get_env("OBENCH_NO_COLOR", context.temp_allocator); val == "1" || val == "true" {
-		cfg.color_output = false
-	}
-	if val := os.get_env("NO_COLOR", context.temp_allocator); len(val) > 0 {
-		// https://no-color.org
+	if !stdout_wants_color() {
 		cfg.color_output = false
 	}
 	if val := os.get_env("OBENCH_BASELINE", context.temp_allocator); len(val) > 0 {

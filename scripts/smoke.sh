@@ -75,6 +75,18 @@ set +e
 set -e
 [ "$code" -eq 1 ] || fail "expected compare to exit 1 for a 10x slowdown, got $code"
 
+step "colors are off when the output isn't a terminal or NO_COLOR is set"
+ESC="$(printf '\033')"
+"$OBENCH" "$WORK_N/regress" --collection "libs=$ROOT_N" -n 5 -w 2 > "$WORK/run_plain.txt"
+! grep -q "$ESC" "$WORK/run_plain.txt" || fail "a run wrote ANSI colors into a file"
+"$OBENCH" compare "$WORK_N/fast.json" "$WORK_N/slow.json" > "$WORK/cmp_plain.txt" || true
+! grep -q "$ESC" "$WORK/cmp_plain.txt" || fail "compare wrote ANSI colors into a file"
+FORCE_COLOR=1 "$OBENCH" compare "$WORK_N/fast.json" "$WORK_N/slow.json" > "$WORK/cmp_forced.txt" || true
+grep -q "$ESC" "$WORK/cmp_forced.txt" || fail "FORCE_COLOR=1 did not keep the colors of compare"
+NO_COLOR=1 FORCE_COLOR=1 "$OBENCH" compare "$WORK_N/fast.json" "$WORK_N/slow.json" \
+  > "$WORK/cmp_no_color.txt" || true
+! grep -q "$ESC" "$WORK/cmp_no_color.txt" || fail "NO_COLOR did not turn off the colors of compare"
+
 step "a baseline from an -o:none build fails the gate instead of looking faster"
 "$OBENCH" "$WORK_N/regress" --collection "libs=$ROOT_N" -o none -n 10 -w 5 --no-color \
   --save-baseline "$WORK_N/none.json" >/dev/null
