@@ -436,6 +436,9 @@ _execute_entry :: proc(
 		if result.diff.is_regression && cfg.fail_on_regression {
 			s.failed_regressions += 1
 		}
+		if result.diff.allocs_grew && cfg.fail_on_alloc_regression {
+			s.failed_alloc_regressions += 1
+		}
 	}
 
 	result.stats = st
@@ -544,11 +547,18 @@ suite_run :: proc(s: ^Suite) -> bool {
 
 /*
 Number of problems found by the last `suite_run` or `run_test`: misused benchmarks, failed
-`@zero_alloc` checks, regressions that fail the run, and unreadable or unwritable files.
+`@zero_alloc` checks, time and allocation regressions that fail the run, and unreadable or
+unwritable files.
 */
 @(require_results)
 suite_failure_count :: proc "contextless" (s: ^Suite) -> int {
-	return s.failed_zero_alloc + s.failed_regressions + s.failed_errors + s.failed_io
+	return(
+		s.failed_zero_alloc +
+		s.failed_regressions +
+		s.failed_alloc_regressions +
+		s.failed_errors +
+		s.failed_io \
+	)
 }
 
 // Runs the suite and writes report files, without printing. Expects the caller to have set
@@ -736,7 +746,7 @@ _suite_execute :: proc(s: ^Suite) -> bool {
 				s.name,
 				s.config.baseline_load_path,
 			)
-			if s.config.fail_on_regression {
+			if s.config.fail_on_regression || s.config.fail_on_alloc_regression {
 				s.failed_io += 1
 			}
 		}

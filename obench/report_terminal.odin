@@ -314,6 +314,11 @@ _notes_cell :: proc(s: ^Suite, r: Result, p: _Palette) -> string {
 		}
 	}
 
+	if r.diff.has_baseline && r.diff.allocs_grew {
+		color := p.red if s.config.fail_on_alloc_regression else p.yellow
+		fmt.sbprintf(&sb, "%s[allocs grew]%s ", color, p.reset)
+	}
+
 	if r.diff.has_baseline {
 		switch {
 		case r.diff.is_improvement:
@@ -587,7 +592,7 @@ _write_summary :: proc(w: io.Writer, s: ^Suite, p: _Palette) {
 	if failures > 0 {
 		fmt.wprintf(
 			w,
-			"%sFAIL:%s %d benchmark(s) │ geomean: %s%s%s (%d errors, %d @zero_alloc failed, %d regressions, %d file errors)%s\n\n",
+			"%sFAIL:%s %d benchmark(s) │ geomean: %s%s%s (%d errors, %d @zero_alloc failed, %d regressions, %d alloc regressions, %d file errors)%s\n\n",
 			p.red,
 			p.reset,
 			len(s.results),
@@ -597,6 +602,7 @@ _write_summary :: proc(w: io.Writer, s: ^Suite, p: _Palette) {
 			s.failed_errors,
 			s.failed_zero_alloc,
 			s.failed_regressions,
+			s.failed_alloc_regressions,
 			s.failed_io,
 			diff_summary,
 		)

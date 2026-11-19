@@ -53,18 +53,19 @@ Group :: struct {
 Top-level benchmark suite.
 */
 Suite :: struct {
-	name:               string,
-	config:             Config,
-	clock:              Clock_Calibration,
-	groups:             [dynamic]^Group,
-	results:            [dynamic]Result,
-	complexities:       [dynamic]Complexity_Estimate,
-	summary:            Suite_Summary,
-	failed_zero_alloc:  int,
-	failed_regressions: int,
-	failed_errors:      int, // Benchmarks that misused the `Bencher` protocol
-	failed_io:          int, // Baseline, trace, or report files that could not be read or written
-	allocator:          runtime.Allocator,
+	name:                     string,
+	config:                   Config,
+	clock:                    Clock_Calibration,
+	groups:                   [dynamic]^Group,
+	results:                  [dynamic]Result,
+	complexities:             [dynamic]Complexity_Estimate,
+	summary:                  Suite_Summary,
+	failed_zero_alloc:        int,
+	failed_regressions:       int,
+	failed_alloc_regressions: int, // Benchmarks whose allocations grew, with `fail_on_alloc_regression`
+	failed_errors:            int, // Benchmarks that misused the `Bencher` protocol
+	failed_io:                int, // Baseline, trace, or report files that could not be read or written
+	allocator:                runtime.Allocator,
 }
 
 /*
@@ -129,6 +130,7 @@ _clear_results :: proc(s: ^Suite) {
 	s.summary = {}
 	s.failed_zero_alloc = 0
 	s.failed_regressions = 0
+	s.failed_alloc_regressions = 0
 	s.failed_errors = 0
 	s.failed_io = 0
 }

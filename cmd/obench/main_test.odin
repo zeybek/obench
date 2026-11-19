@@ -78,13 +78,22 @@ test_parse_cli_args_rejects_bad_input :: proc(t: ^testing.T) {
 @(test)
 test_parse_cli_args_subcommands :: proc(t: ^testing.T) {
 	{
-		opts, err := parse_cli_args({"compare", "old.json", "new.json", "--fail-on-regression"})
+		opts, err := parse_cli_args(
+			{
+				"compare",
+				"old.json",
+				"new.json",
+				"--fail-on-regression",
+				"--fail-on-alloc-regression",
+			},
+		)
 		defer destroy_cli_options(&opts)
 		testing.expect_value(t, err, "")
 		testing.expect_value(t, opts.subcommand, Subcommand.Compare)
 		testing.expect_value(t, opts.compare_old, "old.json")
 		testing.expect_value(t, opts.compare_new, "new.json")
 		testing.expect_value(t, opts.fail_on_regression, true)
+		testing.expect_value(t, opts.fail_on_alloc_regression, true)
 	}
 	{
 		opts, err := parse_cli_args({"examples", "--list"})

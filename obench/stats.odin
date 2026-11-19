@@ -112,6 +112,9 @@ Baseline_Diff :: struct {
 	is_significant:   bool,
 	is_regression:    bool,
 	is_improvement:   bool,
+	// Heap or temp allocations or bytes per operation went up. The counts are exact, so no test
+	// is needed; `fail_on_alloc_regression` turns this into a failure.
+	allocs_grew:      bool,
 }
 
 /*
@@ -647,6 +650,16 @@ compare_baseline :: proc(
 	}
 	significant := samples_differ && abs(delta_median) >= noise_threshold_pct
 
+	// Per-operation counts are a count divided by the iterations, so allow for rounding.
+	grew :: proc(current, baseline: f64) -> bool {
+		return current > baseline + max(1e-9, abs(baseline) * 1e-9)
+	}
+	allocs_grew :=
+		grew(current.allocs_per_op, baseline.allocs_per_op) ||
+		grew(current.alloc_bytes_per_op, baseline.alloc_bytes_per_op) ||
+		grew(current.temp_allocs_per_op, baseline.temp_allocs_per_op) ||
+		grew(current.temp_bytes_per_op, baseline.temp_bytes_per_op)
+
 	return Baseline_Diff {
 		has_baseline = true,
 		delta_median_pct = delta_median,
@@ -660,6 +673,7 @@ compare_baseline :: proc(
 		is_significant = significant,
 		is_regression = significant && delta_median > 0,
 		is_improvement = significant && delta_median < 0,
+		allocs_grew = allocs_grew,
 	}
 }
 

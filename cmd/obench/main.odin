@@ -30,34 +30,35 @@ Subcommand :: enum {
 }
 
 CLI_Options :: struct {
-	subcommand:         Subcommand,
-	target_path:        string,
-	compare_old:        string,
-	compare_new:        string,
-	filter:             string,
-	samples:            int,
-	warmup_ms:          int,
-	opt_mode:           string,
-	microarch:          string,
-	no_bounds_check:    bool,
-	ols:                bool,
-	collections:        [dynamic]string,
-	defines:            [dynamic]string,
-	extra_linker_flags: [dynamic]string,
-	custom_attributes:  [dynamic]string,
-	save_baseline:      string,
-	load_baseline:      string,
-	json_path:          string,
-	md_path:            string,
-	csv_path:           string,
-	spall_path:         string,
-	threshold_pct:      f64,
-	zero_alloc:         bool,
-	untimed_allocs:     bool,
-	timed_allocs:       bool,
-	fail_on_regression: bool,
-	no_color:           bool,
-	no_histogram:       bool,
+	subcommand:               Subcommand,
+	target_path:              string,
+	compare_old:              string,
+	compare_new:              string,
+	filter:                   string,
+	samples:                  int,
+	warmup_ms:                int,
+	opt_mode:                 string,
+	microarch:                string,
+	no_bounds_check:          bool,
+	ols:                      bool,
+	collections:              [dynamic]string,
+	defines:                  [dynamic]string,
+	extra_linker_flags:       [dynamic]string,
+	custom_attributes:        [dynamic]string,
+	save_baseline:            string,
+	load_baseline:            string,
+	json_path:                string,
+	md_path:                  string,
+	csv_path:                 string,
+	spall_path:               string,
+	threshold_pct:            f64,
+	zero_alloc:               bool,
+	untimed_allocs:           bool,
+	timed_allocs:             bool,
+	fail_on_regression:       bool,
+	fail_on_alloc_regression: bool,
+	no_color:                 bool,
+	no_histogram:             bool,
 }
 
 Discovered_Bench :: struct {
@@ -126,6 +127,8 @@ RUN OPTIONS:
                                  the baseline holds none of a suite's benchmarks, it was
                                  built with another -o mode, OS, or arch, or it counted
                                  allocations the other way (see --timed-allocs)
+      --fail-on-alloc-regression Exit with status 1 if a benchmark allocates more per operation
+                                 (heap or temp, count or bytes) than in the baseline
       --json <file>              Write a JSON report
       --md <file>                Write a GitHub Markdown report
       --csv <file>               Write an RFC 4180 CSV report
@@ -156,38 +159,39 @@ package, 2 usage error (also a short flag together with its long form, like -n a
 // `--flag=value`, `-flag value`). Short aliases are hidden fields merged after parsing.
 @(private = "file")
 _Cli_Flags :: struct {
-	overflow:           [dynamic]string,
-	filter:             string,
-	samples:            int,
-	warmup:             int,
-	opt:                string,
-	microarch:          string,
-	no_bounds_check:    bool,
-	ols:                bool,
-	collection:         [dynamic]string,
-	define:             [dynamic]string,
-	extra_linker_flags: [dynamic]string,
-	custom_attribute:   [dynamic]string,
-	save_baseline:      string,
-	baseline:           string,
-	threshold:          f64,
-	json:               string,
-	md:                 string,
-	csv:                string,
-	spall:              string,
-	zero_alloc:         bool,
-	untimed_allocs:     bool,
-	timed_allocs:       bool,
-	fail_on_regression: bool,
-	no_color:           bool,
-	no_histogram:       bool,
-	list:               bool,
-	version:            bool,
-	f:                  string `args:"hidden"`,
-	n:                  int `args:"hidden"`,
-	w:                  int `args:"hidden"`,
-	o:                  string `args:"hidden"`,
-	v:                  bool `args:"hidden"`,
+	overflow:                 [dynamic]string,
+	filter:                   string,
+	samples:                  int,
+	warmup:                   int,
+	opt:                      string,
+	microarch:                string,
+	no_bounds_check:          bool,
+	ols:                      bool,
+	collection:               [dynamic]string,
+	define:                   [dynamic]string,
+	extra_linker_flags:       [dynamic]string,
+	custom_attribute:         [dynamic]string,
+	save_baseline:            string,
+	baseline:                 string,
+	threshold:                f64,
+	json:                     string,
+	md:                       string,
+	csv:                      string,
+	spall:                    string,
+	zero_alloc:               bool,
+	untimed_allocs:           bool,
+	timed_allocs:             bool,
+	fail_on_regression:       bool,
+	fail_on_alloc_regression: bool,
+	no_color:                 bool,
+	no_histogram:             bool,
+	list:                     bool,
+	version:                  bool,
+	f:                        string `args:"hidden"`,
+	n:                        int `args:"hidden"`,
+	w:                        int `args:"hidden"`,
+	o:                        string `args:"hidden"`,
+	v:                        bool `args:"hidden"`,
 }
 
 /*
@@ -352,6 +356,7 @@ parse_cli_args :: proc(
 	opts.untimed_allocs = f.untimed_allocs
 	opts.timed_allocs = f.timed_allocs
 	opts.fail_on_regression = f.fail_on_regression
+	opts.fail_on_alloc_regression = f.fail_on_alloc_regression
 	opts.no_color = f.no_color
 	opts.no_histogram = f.no_histogram
 
@@ -1420,6 +1425,9 @@ _runtime_args :: proc(
 	if opts.fail_on_regression {
 		append(&args, "--fail-on-regression")
 	}
+	if opts.fail_on_alloc_regression {
+		append(&args, "--fail-on-alloc-regression")
+	}
 	if opts.no_color {
 		append(&args, "--no-color")
 	}
@@ -2004,6 +2012,7 @@ main :: proc() {
 			opts.threshold_pct,
 			!opts.no_color && obench.stdout_wants_color(),
 			opts.fail_on_regression,
+			opts.fail_on_alloc_regression,
 		)
 		if err != nil {
 			fmt.eprintfln(

@@ -9,9 +9,10 @@ import "core:testing"
 Runs `s` from an `odin test` procedure.
 
 The report is logged at Info level without colors, and the test fails when the suite has a
-misused benchmark, a failed `@zero_alloc` check, a regression with `fail_on_regression`, or
-a report file that could not be read or written. Benchmarks only mean something in optimized
-builds, so run them with `odin test <dir> -o:speed`; the report warns otherwise.
+misused benchmark, a failed `@zero_alloc` check, a regression with `fail_on_regression` or
+`fail_on_alloc_regression`, or a report file that could not be read or written. Benchmarks
+only mean something in optimized builds, so run them with `odin test <dir> -o:speed`; the
+report warns otherwise.
 
 Example:
 	package my_benchmarks
@@ -46,11 +47,12 @@ run_test :: proc(t: ^testing.T, s: ^Suite, loc := #caller_location) {
 	testing.expectf(
 		t,
 		ok,
-		"obench suite %q failed: %d errors, %d @zero_alloc failures, %d regressions, %d file errors",
+		"obench suite %q failed: %d errors, %d @zero_alloc failures, %d regressions, %d alloc regressions, %d file errors",
 		s.name,
 		s.failed_errors,
 		s.failed_zero_alloc,
 		s.failed_regressions,
+		s.failed_alloc_regressions,
 		s.failed_io,
 		loc = loc,
 	)

@@ -224,6 +224,12 @@ reports the same way. Its
 `--fail-on-regression` also fails when a benchmark that worked in the baseline reports an
 error in the candidate; benchmarks found on one side only are listed but don't fail it.
 
+Allocation counts are exact, so they make a gate that holds even on a noisy shared runner.
+`--fail-on-alloc-regression` fails the run, or `obench compare`, when a benchmark allocates
+more per operation than in the baseline: more heap or temp allocations, or more bytes. There
+is no threshold and no test, and the table marks such a benchmark `[allocs grew]`. A baseline
+that holds none of a suite's benchmarks fails this gate too.
+
 A `--filter` that matches nothing writes no report files, so a typo can't replace a saved
 baseline with an empty one.
 
@@ -249,6 +255,7 @@ pick up these environment variables. Command-line flags of the same name overrid
 	OBENCH_ZERO_ALLOC                1 or true to enable
 	OBENCH_UNTIMED_ALLOCS            0 or false: same as --timed-allocs
 	OBENCH_FAIL_ON_REGRESSION        1 or true to enable
+	OBENCH_FAIL_ON_ALLOC_REGRESSION  1 or true to enable
 	OBENCH_BASELINE                  Baseline to compare against
 	OBENCH_SAVE_BASELINE             Where to save one
 	OBENCH_JSON, OBENCH_MD           Report paths

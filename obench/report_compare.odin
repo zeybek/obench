@@ -19,6 +19,8 @@ Comparison_Summary :: struct {
 	only_in_candidate:       int,
 	// Benchmarks that worked in the baseline but failed in the candidate.
 	errored:                 int,
+	// Matched benchmarks whose heap or temp allocations or bytes per operation went up.
+	alloc_regressions:       int,
 	geomean_delta_pct:       f64,
 	// The reports come from builds with a different optimization mode, OS, or architecture,
 	// so their timings can't be compared.
@@ -138,6 +140,9 @@ write_comparison :: proc(
 		new_st := _export_entry_stats(e)
 		diff := compare_baseline(new_st, old_st, noise_threshold_pct)
 		summary.matched += 1
+		if diff.allocs_grew {
+			summary.alloc_regressions += 1
+		}
 
 		if ratio := 1.0 + diff.delta_median_pct / 100.0; diff.has_baseline && ratio > 0 {
 			ratio_log_sum += math.ln(ratio)
@@ -164,6 +169,9 @@ write_comparison :: proc(
 				format_bytes(new_st.alloc_bytes_per_op),
 				diff.delta_bytes_pct,
 			)
+		}
+		if diff.allocs_grew {
+			bytes_str = fmt.tprintf("%s %sallocs grew%s", bytes_str, p.red, p.reset)
 		}
 
 		table.row(tbl)
@@ -232,6 +240,15 @@ write_comparison :: proc(
 		p.reset,
 		summary.unchanged,
 	)
+	if summary.alloc_regressions > 0 {
+		fmt.wprintf(
+			w,
+			"%s%d benchmark(s) allocate more per operation than in the baseline%s\n",
+			p.red,
+			summary.alloc_regressions,
+			p.reset,
+		)
+	}
 	if summary.errored > 0 {
 		fmt.wprintf(
 			w,
@@ -258,11 +275,13 @@ write_comparison :: proc(
 Compares two saved JSON reports in `benchstat` style and prints the result to stdout
 (see `write_comparison`).
 
-`passed` is `false` only when `fail_on_regression` is set and something regressed, a
-benchmark that worked in the baseline failed in the candidate, the two reports come from
-builds with a different optimization mode, OS, or architecture, or they counted allocations
-differently while the baseline has a benchmark that allocates. Benchmarks missing from one
-side are listed but don't fail the comparison (a candidate run may use a filter).
+`passed` is `false` when `fail_on_regression` is set and something regressed, a benchmark
+that worked in the baseline failed in the candidate, the two reports come from builds with a
+different optimization mode, OS, or architecture, or they counted allocations differently
+while the baseline has a benchmark that allocates. It is also `false` when
+`fail_on_alloc_regression` is set and a benchmark allocates more per operation (heap or temp,
+count or bytes) than in the baseline. Benchmarks missing from one side are listed but don't
+fail the comparison (a candidate run may use a filter).
 */
 @(require_results)
 compare_baseline_files :: proc(
@@ -271,6 +290,7 @@ compare_baseline_files :: proc(
 	noise_threshold_pct: f64 = 2.0,
 	color_output := true,
 	fail_on_regression := false,
+	fail_on_alloc_regression := false,
 ) -> (
 	passed: bool,
 	err: Report_Error,
@@ -301,5 +321,6 @@ compare_baseline_files :: proc(
 		summary.errored > 0 ||
 		summary.build_mismatch ||
 		summary.alloc_counting_mismatch
-	return !(fail_on_regression && failed), nil
+	alloc_failed := summary.alloc_regressions > 0
+	return !(fail_on_regression && failed) && !(fail_on_alloc_regression && alloc_failed), nil
 }

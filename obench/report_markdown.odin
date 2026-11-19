@@ -87,9 +87,10 @@ write_markdown_report :: proc(w: io.Writer, s: ^Suite) -> io.Error {
 		if r.diff.has_baseline {
 			fmt.sbprintf(
 				&notes,
-				"(%+.1f%% vs baseline%s) ",
+				"(%+.1f%% vs baseline%s%s) ",
 				r.diff.delta_median_pct,
 				r.diff.is_regression ? ", regression" : "",
+				r.diff.allocs_grew ? ", allocs grew" : "",
 			)
 		}
 		if r.zero_alloc_failed {

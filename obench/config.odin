@@ -18,28 +18,29 @@ that allocate.
 `suite_create` returns.
 */
 Config :: struct {
-	warmup_time:          time.Duration, // Default: DEFAULT_WARMUP_MS (40ms)
-	min_sample_time:      time.Duration, // Default: DEFAULT_MIN_SAMPLE_US (1ms)
-	max_bench_time:       time.Duration, // Default: DEFAULT_MAX_BENCH_MS (1200ms), wall-clock budget for the sampling phase
-	sample_count:         int, // Default: DEFAULT_SAMPLES (50)
-	fixed_batch_size:     int, // 0 = auto-calibrate
-	reset_temp_per_iter:  bool, // Default: true (frees the benchmark's private temp arena after every sample batch)
-	enforce_zero_allocs:  bool, // Fail if heap allocations > 0 inside measured loop
-	untimed_alloc_check:  bool, // Default: DEFAULT_UNTIMED_ALLOCS (true: count allocations in one untimed batch after sampling; false: in every timed sample)
-	fail_on_regression:   bool, // Fail suite if any benchmark regresses beyond noise_threshold_pct
-	filter:               string, // Substring filter on the full benchmark name
-	noise_threshold_pct:  f64, // Default: 2.0%
-	color_output:         bool, // Default: DEFAULT_COLOR
-	show_histogram:       bool, // Default: DEFAULT_HISTOGRAM
-	baseline_load_path:   string,
+	warmup_time:              time.Duration, // Default: DEFAULT_WARMUP_MS (40ms)
+	min_sample_time:          time.Duration, // Default: DEFAULT_MIN_SAMPLE_US (1ms)
+	max_bench_time:           time.Duration, // Default: DEFAULT_MAX_BENCH_MS (1200ms), wall-clock budget for the sampling phase
+	sample_count:             int, // Default: DEFAULT_SAMPLES (50)
+	fixed_batch_size:         int, // 0 = auto-calibrate
+	reset_temp_per_iter:      bool, // Default: true (frees the benchmark's private temp arena after every sample batch)
+	enforce_zero_allocs:      bool, // Fail if heap allocations > 0 inside measured loop
+	untimed_alloc_check:      bool, // Default: DEFAULT_UNTIMED_ALLOCS (true: count allocations in one untimed batch after sampling; false: in every timed sample)
+	fail_on_regression:       bool, // Fail suite if any benchmark regresses beyond noise_threshold_pct
+	fail_on_alloc_regression: bool, // Fail suite if a benchmark's allocations or bytes per op grew against the baseline
+	filter:                   string, // Substring filter on the full benchmark name
+	noise_threshold_pct:      f64, // Default: 2.0%
+	color_output:             bool, // Default: DEFAULT_COLOR
+	show_histogram:           bool, // Default: DEFAULT_HISTOGRAM
+	baseline_load_path:       string,
 	// Compare only with baseline entries of this suite's name, even when the baseline holds a
 	// single suite (set by the CLI when it runs several packages). Default: false.
-	match_baseline_suite: bool,
-	baseline_save_path:   string,
-	json_export_path:     string,
-	md_export_path:       string,
-	csv_export_path:      string,
-	spall_export_path:    string,
+	match_baseline_suite:     bool,
+	baseline_save_path:       string,
+	json_export_path:         string,
+	md_export_path:           string,
+	csv_export_path:          string,
+	spall_export_path:        string,
 }
 
 /*
@@ -73,20 +74,21 @@ String fields read from the environment are allocated with `context.temp_allocat
 @(require_results)
 default_config :: proc() -> Config {
 	cfg := Config {
-		warmup_time         = time.Duration(DEFAULT_WARMUP_MS) * time.Millisecond,
-		min_sample_time     = time.Duration(DEFAULT_MIN_SAMPLE_US) * time.Microsecond,
-		max_bench_time      = time.Duration(DEFAULT_MAX_BENCH_MS) * time.Millisecond,
-		sample_count        = DEFAULT_SAMPLES,
-		fixed_batch_size    = 0,
-		reset_temp_per_iter = true,
-		enforce_zero_allocs = DEFAULT_ZERO_ALLOC,
-		untimed_alloc_check = DEFAULT_UNTIMED_ALLOCS,
-		fail_on_regression  = false,
-		filter              = "",
-		noise_threshold_pct = 2.0,
-		color_output        = DEFAULT_COLOR,
-		show_histogram      = DEFAULT_HISTOGRAM,
-		spall_export_path   = DEFAULT_SPALL_PATH,
+		warmup_time              = time.Duration(DEFAULT_WARMUP_MS) * time.Millisecond,
+		min_sample_time          = time.Duration(DEFAULT_MIN_SAMPLE_US) * time.Microsecond,
+		max_bench_time           = time.Duration(DEFAULT_MAX_BENCH_MS) * time.Millisecond,
+		sample_count             = DEFAULT_SAMPLES,
+		fixed_batch_size         = 0,
+		reset_temp_per_iter      = true,
+		enforce_zero_allocs      = DEFAULT_ZERO_ALLOC,
+		untimed_alloc_check      = DEFAULT_UNTIMED_ALLOCS,
+		fail_on_regression       = false,
+		fail_on_alloc_regression = false,
+		filter                   = "",
+		noise_threshold_pct      = 2.0,
+		color_output             = DEFAULT_COLOR,
+		show_histogram           = DEFAULT_HISTOGRAM,
+		spall_export_path        = DEFAULT_SPALL_PATH,
 	}
 
 	if val := os.get_env("OBENCH_FILTER", context.temp_allocator); len(val) > 0 {
@@ -115,6 +117,10 @@ default_config :: proc() -> Config {
 	if val := os.get_env("OBENCH_FAIL_ON_REGRESSION", context.temp_allocator);
 	   val == "1" || val == "true" {
 		cfg.fail_on_regression = true
+	}
+	if val := os.get_env("OBENCH_FAIL_ON_ALLOC_REGRESSION", context.temp_allocator);
+	   val == "1" || val == "true" {
+		cfg.fail_on_alloc_regression = true
 	}
 	if val := os.get_env("OBENCH_THRESHOLD", context.temp_allocator); len(val) > 0 {
 		if f, ok := strconv.parse_f64(val); ok && f > 0 {
@@ -180,6 +186,9 @@ apply_args :: proc(cfg: ^Config, args: []string) {
 			continue
 		case "--fail-on-regression", "-fail-on-regression":
 			cfg.fail_on_regression = true
+			continue
+		case "--fail-on-alloc-regression", "-fail-on-alloc-regression":
+			cfg.fail_on_alloc_regression = true
 			continue
 		case "--no-color", "-no-color":
 			cfg.color_output = false

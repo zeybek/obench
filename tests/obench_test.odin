@@ -1902,3 +1902,118 @@ test_samples_below_the_clock_overhead_are_reported_as_clamped :: proc(t: ^testin
 	note := fmt.tprintf("[clamped: %d/%d samples]", st.samples, st.samples)
 	testing.expectf(t, strings.contains(report, note), "expected %q in:\n%s", note, report)
 }
+
+@(test)
+test_compare_baseline_flags_allocations_that_grew :: proc(t: ^testing.T) {
+	base := obench.Stats {
+		samples            = 10,
+		p50_ns             = 100,
+		mean_ns            = 100,
+		std_dev_ns         = 1,
+		allocs_per_op      = 2,
+		alloc_bytes_per_op = 128,
+		temp_allocs_per_op = 1,
+		temp_bytes_per_op  = 64,
+	}
+	testing.expect(t, !obench.compare_baseline(base, base).allocs_grew, "same counts")
+
+	fewer := base
+	fewer.allocs_per_op = 1
+	fewer.alloc_bytes_per_op = 64
+	testing.expect(t, !obench.compare_baseline(fewer, base).allocs_grew, "fewer allocations")
+
+	more_allocs := base
+	more_allocs.allocs_per_op = 3
+	testing.expect(t, obench.compare_baseline(more_allocs, base).allocs_grew, "more allocations")
+
+	more_temp_bytes := base
+	more_temp_bytes.temp_bytes_per_op = 65
+	testing.expect(
+		t,
+		obench.compare_baseline(more_temp_bytes, base).allocs_grew,
+		"more temp bytes",
+	)
+
+	// A count over many iterations can differ in the last bits without growing.
+	rounding := base
+	rounding.allocs_per_op = 2 + 1e-12
+	testing.expect(t, !obench.compare_baseline(rounding, base).allocs_grew, "rounding only")
+}
+
+@(test)
+test_fail_on_alloc_regression_fails_a_run_that_allocates_more :: proc(t: ^testing.T) {
+	path := ".obench_test_alloc_gate.json"
+	defer _ = os.remove(path)
+
+	cfg := quick_config()
+	cfg.baseline_save_path = path
+	{
+		s := obench.suite_create("alloc_gate", cfg)
+		defer obench.suite_destroy(&s)
+		obench.bench(&s, "work", _noop_step)
+		testing.expect(t, obench.suite_run(&s))
+	}
+
+	cfg.baseline_save_path = ""
+	cfg.baseline_load_path = path
+	cfg.noise_threshold_pct = 1e9 // Only the allocations may fail the gate here.
+	for gate in ([2]bool{false, true}) {
+		cfg.fail_on_alloc_regression = gate
+		s := obench.suite_create("alloc_gate", cfg)
+		defer obench.suite_destroy(&s)
+		obench.bench(&s, "work", _alloc_and_temp_and_resize)
+		passed := obench.suite_run(&s)
+		if !testing.expect_value(t, len(s.results), 1) {
+			return
+		}
+		testing.expect(t, s.results[0].diff.allocs_grew, "the benchmark allocates now")
+
+		sb := strings.builder_make(context.temp_allocator)
+		obench.write_terminal_report(strings.to_writer(&sb), &s)
+		testing.expect(t, strings.contains(strings.to_string(sb), "[allocs grew]"))
+		if gate {
+			testing.expect(t, !passed, "the gate fails the run")
+			testing.expect_value(t, s.failed_alloc_regressions, 1)
+			testing.expect_value(t, obench.suite_failure_count(&s), 1)
+		} else {
+			testing.expect(t, passed, "without the gate it is only a note")
+			testing.expect_value(t, s.failed_alloc_regressions, 0)
+		}
+	}
+}
+
+@(test)
+test_compare_counts_and_gates_allocations_that_grew :: proc(t: ^testing.T) {
+	entry := obench.Export_Entry {
+		suite_name         = "s",
+		full_name          = "work",
+		samples            = 10,
+		p50_ns             = 100,
+		mean_ns            = 100,
+		std_dev_ns         = 1,
+		allocs_per_op      = 1,
+		alloc_bytes_per_op = 64,
+	}
+	grown := entry
+	grown.allocs_per_op = 2
+	grown.alloc_bytes_per_op = 128
+	old_doc := obench.Export_Document {
+		format_version = obench.REPORT_FORMAT_VERSION,
+		suite_name     = "s",
+		untimed_allocs = true,
+		benchmarks     = []obench.Export_Entry{entry},
+	}
+	new_doc := old_doc
+	new_doc.benchmarks = []obench.Export_Entry{grown}
+
+	sb := strings.builder_make(context.temp_allocator)
+	summary := obench.write_comparison(strings.to_writer(&sb), old_doc, new_doc, 2.0, false)
+	testing.expect_value(t, summary.alloc_regressions, 1)
+	testing.expect(
+		t,
+		strings.contains(strings.to_string(sb), "allocs grew"),
+		strings.to_string(sb),
+	)
+	same := obench.write_comparison(strings.to_writer(&sb), old_doc, old_doc, 2.0, false)
+	testing.expect_value(t, same.alloc_regressions, 0)
+}
