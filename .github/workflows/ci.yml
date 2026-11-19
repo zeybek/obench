@@ -103,6 +103,11 @@ jobs:
           odin build cmd/obench -out:"$exe" -o:speed "${flags[@]}"
           echo "CLI_BIN=./$exe" >> "$GITHUB_ENV"
 
+      # The README's commands write bin/obench, which Odin names bin/obench.exe on Windows.
+      - name: The README's build step works in a fresh copy
+        if: runner.os != 'Windows'
+        run: ./scripts/check_readme_build.sh
+
       - name: End-to-end smoke test
         run: ./scripts/smoke.sh "$CLI_BIN"
 
