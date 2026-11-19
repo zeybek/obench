@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/obench-logo-white.svg">
+    <img src=".github/assets/obench-logo-black.svg" width="160" alt="obench">
+  </picture>
+</p>
+
 # obench
 
 [![CI](https://github.com/zeybek/obench/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/zeybek/obench/actions/workflows/ci.yml)
