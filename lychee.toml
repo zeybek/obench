@@ -1,5 +1,14 @@
 # Settings for lychee (https://lychee.cli.rs), read by `make links` and the Links workflow.
 
 # release-please writes a compare link to the new tag into CHANGELOG.md, and the tag only
-# exists once its release PR is merged.
-exclude = ['^https://github\.com/zeybek/obench/compare/v']
+# exists once its release PR is merged. It also links every entry to its commit on main,
+# and GitHub's commit pages often answer 503 even to one request a second (#54).
+exclude = [
+  '^https://github\.com/zeybek/obench/compare/v',
+  '^https://github\.com/zeybek/obench/commit/',
+]
+
+# Other GitHub pages have answered 503 now and then too, so retry for longer before
+# calling a link dead.
+max_retries = 5
+retry_wait_time = 5
