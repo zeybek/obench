@@ -20,7 +20,7 @@ Status: before 1.0. The API and the JSON report layout can still change, and the
 
 ## Guide
 
-The [package documentation](https://zeybek.github.io/obench/obench/) covers the annotations, destructive and multi-threaded benchmarks, running from your own `main` or inside `odin test`, reading the report, configuration, and the known limits. `obench help` lists the CLI options.
+[How to benchmark Odin code](docs/how-to-benchmark.md) goes through the method: optimized builds, warmup and repetition, keeping the compiler from deleting the work, and keeping setup and I/O out of the timed part. The [package documentation](https://zeybek.github.io/obench/obench/) covers the annotations, destructive and multi-threaded benchmarks, running from your own `main` or inside `odin test`, reading the report, configuration, and the known limits. `obench help` lists the CLI options.
 
 ## Getting Started
 
