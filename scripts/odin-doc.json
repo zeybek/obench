@@ -1,6 +1,7 @@
 {
 	"hide_core": true,
 	"hide_base": true,
+	"domain": "zeybek.github.io",
 	"url_prefix": "/obench",
 	"collections": {
 		"obench": {
