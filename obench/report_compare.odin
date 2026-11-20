@@ -347,6 +347,14 @@ write_comparison :: proc(
 			p.reset,
 		)
 	}
+	if _nothing_compared(summary) {
+		fmt.wprintf(
+			w,
+			"%sNo benchmark is in both reports, so nothing was compared%s\n",
+			p.red,
+			p.reset,
+		)
+	}
 	if summary.only_in_baseline > 0 || summary.only_in_candidate > 0 {
 		fmt.wprintf(
 			w,
@@ -416,6 +424,10 @@ write_comparison_markdown :: proc(
 	}
 	if summary.errored > 0 {
 		fmt.wprintf(w, "- %d benchmark(s) failed in the candidate.\n", summary.errored)
+		warned = true
+	}
+	if _nothing_compared(summary) {
+		io.write_string(w, "- No benchmark is in both reports, so nothing was compared.\n")
 		warned = true
 	}
 	if summary.only_in_baseline > 0 || summary.only_in_candidate > 0 {
@@ -580,16 +592,55 @@ write_comparison_json :: proc(
 }
 
 /*
-Compares two saved JSON reports in `benchstat` style and prints the result to stdout
-(see `write_comparison`).
+Exit status for a comparison with `summary` under the given gates, as `obench compare` uses
+it (see `suite_exit_code` for a run):
 
-`passed` is `false` when `fail_on_regression` is set and something regressed, a benchmark
-that worked in the baseline failed in the candidate, the two reports come from builds with a
-different optimization mode, OS, or architecture, or they counted allocations differently
-while the baseline has a benchmark that allocates. It is also `false` when
-`fail_on_alloc_regression` is set and a benchmark allocates more per operation (heap or temp,
-count or bytes) than in the baseline. Benchmarks missing from one side are listed but don't
-fail the comparison (a candidate run may use a filter).
+- `EXIT_FAILURE` (1) when `fail_on_regression` is set and a benchmark regressed or failed in
+  the candidate after working in the baseline, or `fail_on_alloc_regression` is set and a
+  benchmark allocates more per operation (heap or temp, count or bytes) than in the baseline
+- `EXIT_BASELINE` (3) when a gate is set and the two reports have no benchmark in common, or
+  `fail_on_regression` is set and they come from builds with a different optimization mode,
+  OS, or architecture, or counted allocations differently while the baseline has a benchmark
+  that allocates. Time regressions don't count then, since the times can't be compared.
+- `EXIT_SUCCESS` (0) otherwise, and always without a gate
+
+Benchmarks missing from one side are listed but don't fail the comparison, as long as some
+are in both (a candidate run may use a filter).
+*/
+@(require_results)
+comparison_exit_code :: proc "contextless" (
+	summary: Comparison_Summary,
+	fail_on_regression := false,
+	fail_on_alloc_regression := false,
+) -> int {
+	if fail_on_regression && summary.errored > 0 {
+		return EXIT_FAILURE
+	}
+	if fail_on_alloc_regression && summary.alloc_regressions > 0 {
+		return EXIT_FAILURE
+	}
+	if (fail_on_regression || fail_on_alloc_regression) && _nothing_compared(summary) {
+		return EXIT_BASELINE
+	}
+	if fail_on_regression && (summary.build_mismatch || summary.alloc_counting_mismatch) {
+		return EXIT_BASELINE
+	}
+	if fail_on_regression && summary.regressions > 0 {
+		return EXIT_FAILURE
+	}
+	return EXIT_SUCCESS
+}
+
+// The candidate has benchmarks, but none of them is in the baseline.
+@(private = "file")
+_nothing_compared :: proc "contextless" (summary: Comparison_Summary) -> bool {
+	return summary.matched == 0 && summary.errored == 0 && summary.only_in_candidate > 0
+}
+
+/*
+Compares two saved JSON reports in `benchstat` style and prints the result to stdout
+(see `write_comparison`). `passed` is `false` when `comparison_exit_code` isn't 0 for the
+comparison and the given gates.
 */
 @(require_results)
 compare_baseline_files :: proc(
@@ -624,11 +675,6 @@ compare_baseline_files :: proc(
 	fmt.wprintln(out)
 	_, _ = os.write_string(os.stdout, strings.to_string(sb))
 
-	failed :=
-		summary.regressions > 0 ||
-		summary.errored > 0 ||
-		summary.build_mismatch ||
-		summary.alloc_counting_mismatch
-	alloc_failed := summary.alloc_regressions > 0
-	return !(fail_on_regression && failed) && !(fail_on_alloc_regression && alloc_failed), nil
+	code := comparison_exit_code(summary, fail_on_regression, fail_on_alloc_regression)
+	return code == EXIT_SUCCESS, nil
 }

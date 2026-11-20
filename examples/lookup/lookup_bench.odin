@@ -76,6 +76,6 @@ main :: proc() {
 	obench.group_bench(g, "odin_map", bench_hash_map, zero_alloc = true)
 
 	if !obench.suite_run(&s) {
-		os.exit(1)
+		os.exit(obench.suite_exit_code(&s))
 	}
 }

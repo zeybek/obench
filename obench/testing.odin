@@ -123,9 +123,20 @@ suite_failure_messages :: proc(s: ^Suite, allocator := context.temp_allocator) -
 		append(
 			&out,
 			fmt.aprintf(
-				"obench suite %q: %d baseline, trace, or report file problem(s); see the warnings above",
+				"obench suite %q: %d trace or report file(s) could not be written; see the warnings above",
 				s.name,
 				s.failed_io,
+				allocator = allocator,
+			),
+		)
+	}
+	if s.failed_baseline > 0 {
+		append(
+			&out,
+			fmt.aprintf(
+				"obench suite %q: the baseline can't be compared with this run (%d problem(s)); see the warnings above, and save it again",
+				s.name,
+				s.failed_baseline,
 				allocator = allocator,
 			),
 		)

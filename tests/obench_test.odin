@@ -808,7 +808,8 @@ test_missing_baseline_fails_the_run :: proc(t: ^testing.T) {
 	defer obench.suite_destroy(&s)
 	obench.bench(&s, "noop", _noop_step)
 	testing.expect(t, !obench.suite_run(&s), "an unreadable baseline must not pass silently")
-	testing.expect_value(t, s.failed_io, 1)
+	testing.expect_value(t, s.failed_baseline, 1)
+	testing.expect_value(t, obench.suite_exit_code(&s), obench.EXIT_BASELINE)
 }
 
 // An optimization mode that isn't the one these tests were built with.
@@ -853,7 +854,8 @@ test_baseline_from_another_build_fails_the_gate :: proc(t: ^testing.T) {
 	defer obench.suite_destroy(&s)
 	obench.bench(&s, "noop", _noop_step)
 	testing.expect(t, !obench.suite_run(&s), "a baseline from another build must fail the gate")
-	testing.expect_value(t, s.failed_io, 1)
+	testing.expect_value(t, s.failed_baseline, 1)
+	testing.expect_value(t, obench.suite_exit_code(&s), obench.EXIT_BASELINE)
 }
 
 @(test)
@@ -1514,10 +1516,11 @@ test_baseline_counted_the_other_way_fails_the_gate :: proc(t: ^testing.T) {
 		obench.bench(&s, "work", _alloc_and_temp_and_resize if allocating else _noop_step)
 		if allocating {
 			testing.expect(t, !obench.suite_run(&s), "times with the counting in them can't gate")
-			testing.expect_value(t, s.failed_io, 1)
+			testing.expect_value(t, s.failed_baseline, 1)
+			testing.expect_value(t, obench.suite_exit_code(&s), obench.EXIT_BASELINE)
 		} else {
 			testing.expect(t, obench.suite_run(&s), "a benchmark that doesn't allocate can")
-			testing.expect_value(t, s.failed_io, 0)
+			testing.expect_value(t, s.failed_baseline, 0)
 		}
 	}
 }

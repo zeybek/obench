@@ -572,8 +572,8 @@ suite_run :: proc(s: ^Suite) -> bool {
 
 /*
 Number of problems found by the last `suite_run` or `run_test`: misused benchmarks, failed
-`@zero_alloc` checks, time and allocation regressions that fail the run, and unreadable or
-unwritable files.
+`@zero_alloc` checks, time and allocation regressions that fail the run, files that couldn't
+be written, and baselines that can't be compared with the run.
 */
 @(require_results)
 suite_failure_count :: proc "contextless" (s: ^Suite) -> int {
@@ -582,8 +582,45 @@ suite_failure_count :: proc "contextless" (s: ^Suite) -> int {
 		s.failed_regressions +
 		s.failed_alloc_regressions +
 		s.failed_errors +
-		s.failed_io \
+		s.failed_io +
+		s.failed_baseline \
 	)
+}
+
+// Exit status of a run or comparison that passed.
+EXIT_SUCCESS :: 0
+// Exit status when a benchmark failed or regressed, or a file couldn't be written.
+EXIT_FAILURE :: 1
+// Exit status of the CLI for a usage error: an unknown flag or a missing argument.
+EXIT_USAGE :: 2
+// Exit status when the baseline can't be compared with the run, so CI can save it again.
+EXIT_BASELINE :: 3
+
+/*
+Exit status for a program that ran `s`, as the CLI's generated runner uses it:
+
+- `EXIT_SUCCESS` (0) when `suite_run` passed
+- `EXIT_FAILURE` (1) when a benchmark failed or regressed, or a file couldn't be written
+- `EXIT_BASELINE` (3) when the baseline can't be compared with this run: it can't be read,
+  was built with another optimization mode, OS, or architecture, counted allocations the
+  other way, or holds none of the suite's benchmarks
+
+Time regressions against a baseline that can't be compared don't count, since its times mean
+nothing for this run, but a failed benchmark or a growth in allocations still gives 1. A CI
+job can save the baseline again on 3 instead of failing.
+*/
+@(require_results)
+suite_exit_code :: proc "contextless" (s: ^Suite) -> int {
+	if s.failed_errors + s.failed_zero_alloc + s.failed_io + s.failed_alloc_regressions > 0 {
+		return EXIT_FAILURE
+	}
+	if s.failed_baseline > 0 {
+		return EXIT_BASELINE
+	}
+	if s.failed_regressions > 0 {
+		return EXIT_FAILURE
+	}
+	return EXIT_SUCCESS
 }
 
 // Runs the suite and writes report files, without printing. Expects the caller to have set
@@ -604,7 +641,7 @@ _suite_execute :: proc(s: ^Suite) -> bool {
 				s.config.baseline_load_path,
 				err,
 			)
-			s.failed_io += 1
+			s.failed_baseline += 1
 		} else {
 			_fill_baseline_map(
 				doc,
@@ -626,7 +663,7 @@ _suite_execute :: proc(s: ^Suite) -> bool {
 					_build_string(current),
 				)
 				if s.config.fail_on_regression {
-					s.failed_io += 1
+					s.failed_baseline += 1
 				}
 			}
 
@@ -649,7 +686,7 @@ _suite_execute :: proc(s: ^Suite) -> bool {
 						_alloc_counting_flag(doc.untimed_allocs),
 					)
 					if s.config.fail_on_regression {
-						s.failed_io += 1
+						s.failed_baseline += 1
 					}
 				}
 			}
@@ -772,7 +809,7 @@ _suite_execute :: proc(s: ^Suite) -> bool {
 				s.config.baseline_load_path,
 			)
 			if s.config.fail_on_regression || s.config.fail_on_alloc_regression {
-				s.failed_io += 1
+				s.failed_baseline += 1
 			}
 		}
 	}

@@ -592,7 +592,7 @@ _write_summary :: proc(w: io.Writer, s: ^Suite, p: _Palette) {
 	if failures > 0 {
 		fmt.wprintf(
 			w,
-			"%sFAIL:%s %d benchmark(s) │ geomean: %s%s%s (%d errors, %d @zero_alloc failed, %d regressions, %d alloc regressions, %d file errors)%s\n\n",
+			"%sFAIL:%s %d benchmark(s) │ geomean: %s%s%s (%d errors, %d @zero_alloc failed, %d regressions, %d alloc regressions, %d file errors, %d baseline problems)%s\n\n",
 			p.red,
 			p.reset,
 			len(s.results),
@@ -604,6 +604,7 @@ _write_summary :: proc(w: io.Writer, s: ^Suite, p: _Palette) {
 			s.failed_regressions,
 			s.failed_alloc_regressions,
 			s.failed_io,
+			s.failed_baseline,
 			diff_summary,
 		)
 	} else {
