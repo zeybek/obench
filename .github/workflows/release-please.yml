@@ -78,6 +78,7 @@ jobs:
         shell: bash
     env:
       TARGET: ${{ matrix.target }}
+      APPLE_SIGNING: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -94,7 +95,45 @@ jobs:
           exe=obench
           if [ "$RUNNER_OS" = "Windows" ]; then exe=obench.exe; fi
           mkdir -p "dist/cli-$TARGET"
-          odin build cmd/obench -out:"dist/cli-$TARGET/$exe" -o:speed
+          scripts/build_release_cli.sh "dist/cli-$TARGET/$exe"
+
+      # Debian 11 has glibc 2.31, older than any runner's.
+      - name: The Linux CLI runs on Debian 11
+        if: runner.os == 'Linux'
+        run: docker run --rm -v "$PWD:/w" -w /w debian:11 "dist/cli-$TARGET/obench" list examples
+
+      # Signing and notarizing needs an Apple Developer ID; see CONTRIBUTING.md for the secrets.
+      - name: Sign and notarize the macOS CLI
+        if: runner.os == 'macOS' && env.APPLE_SIGNING == 'true'
+        env:
+          P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          exe="dist/cli-$TARGET/obench"
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password="$(openssl rand -hex 24)"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 900 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          echo "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
+          codesign --force --options runtime --timestamp --keychain "$keychain" --sign "$IDENTITY" "$exe"
+          ditto -c -k "$exe" "$RUNNER_TEMP/notarize.zip"
+          result="$(xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" --apple-id "$APPLE_ID" --team-id "$TEAM_ID" --password "$APP_PASSWORD" --wait 2>&1)"
+          echo "$result"
+          echo "$result" | grep -q "status: Accepted"
+          spctl -a -vv -t install "$exe"
+          security delete-keychain "$keychain"
+
+      - name: No Apple secrets, so the macOS CLI is only ad-hoc signed
+        if: runner.os == 'macOS' && env.APPLE_SIGNING != 'true'
+        run: echo "::notice::The macOS CLI isn't notarized because the Apple signing secrets aren't set (see CONTRIBUTING.md)."
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

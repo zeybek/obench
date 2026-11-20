@@ -71,4 +71,10 @@ Every change to `main` goes through a pull request, the maintainer's own include
 
 After CI passes on a push to `main`, release-please opens or updates a release PR. If CI fails, the release PR stays as it was until a later push passes. It picks the next version from the commits since the last release (before 1.0, a breaking change bumps the minor version) and writes the changelog entry. The PR updates `CHANGELOG.md` and `VERSION` in `obench/doc.odin`. Merging it tags the release and creates the GitHub release as a draft. The CLIs for five platforms are built with read-only access and one fixed Odin release, `ODIN_RELEASE` at the top of `.github/workflows/release-please.yml`, which has to be raised by hand. A last job packs them and the `obench` folder with `scripts/package_release.py`, which gives the same archive for the same files, attests where each archive came from, attaches the archives with their SHA-256 sums, and publishes the release. With immutable releases turned on in the repository settings, the assets of a published release can't be replaced.
 
+The CLIs are built by `scripts/build_release_cli.sh`, which links the Linux ones statically, and the release job runs each Linux CLI in a `debian:11` container, whose glibc is older than any runner's. The macOS CLIs are signed with a Developer ID and notarized when the repository has these secrets, and only ad-hoc signed otherwise:
+
+- `APPLE_CERTIFICATE_P12_BASE64` and `APPLE_CERTIFICATE_PASSWORD`: the Developer ID Application certificate, exported as a `.p12` file and base64-encoded, and its password
+- `APPLE_SIGNING_IDENTITY`: its name, like `Developer ID Application: Name (TEAMID)`
+- `APPLE_ID`, `APPLE_TEAM_ID` and `APPLE_APP_PASSWORD`: the Apple ID, team, and an app-specific password for `notarytool`
+
 The release PR is opened with the default `GITHUB_TOKEN`, and GitHub holds the CI runs on it until a maintainer approves them on the pull request (they show as "action required"). To have CI start on release PRs without that step, add a personal access token as a repository secret and pass it to the action as `token`.

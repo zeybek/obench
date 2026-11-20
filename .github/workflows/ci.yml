@@ -148,6 +148,34 @@ jobs:
       - name: Reports match the JSON Schema in schema/
         run: make schema-check
 
+  # Release CLIs for Linux are linked statically (scripts/build_release_cli.sh) so they run on
+  # a glibc older than the runner's; Debian 11 has 2.31.
+  static-cli:
+    name: static CLI / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: laytan/setup-odin@8536d8fa450ec6f1bd9ddc84bbaaf16296c0051d # v2.12.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          release: latest
+
+      - name: Build the CLI the way releases do
+        run: scripts/build_release_cli.sh obench-static
+
+      - name: It runs on Debian 11
+        run: |
+          file obench-static
+          docker run --rm -v "$PWD:/w" -w /w debian:11 ./obench-static version
+          docker run --rm -v "$PWD:/w" -w /w debian:11 ./obench-static list examples
+
   format:
     name: odinfmt
     runs-on: ubuntu-latest
