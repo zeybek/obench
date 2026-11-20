@@ -76,6 +76,9 @@ Suite :: struct {
 	// result near it most likely had its work optimized away. 0 when nothing ran or with
 	// `Config.test_mode`.
 	empty_loop_ns:            f64,
+	// Why `Config.counters` gave no hardware counters, like "perf_event_open failed with
+	// EACCES"; "" when it did or wasn't set.
+	counters_unavailable:     string,
 	allocator:                runtime.Allocator,
 }
 
@@ -161,6 +164,8 @@ _clear_results :: proc(s: ^Suite) {
 	s.failed_baseline = 0
 	machine_state_destroy(&s.machine_state, s.allocator)
 	s.empty_loop_ns = 0
+	delete(s.counters_unavailable, s.allocator)
+	s.counters_unavailable = ""
 }
 
 /*

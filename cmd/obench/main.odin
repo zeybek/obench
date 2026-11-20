@@ -48,6 +48,7 @@ CLI_Options :: struct {
 	batch_size:               int,
 	test_mode:                bool,
 	quiet:                    bool,
+	counters:                 bool,
 	list_json:                bool,
 	opt_mode:                 string,
 	microarch:                string,
@@ -144,6 +145,8 @@ RUN OPTIONS:
       --test                     Run every benchmark once with one iteration and every check,
                                  without measuring it (no baseline)
   -q, --quiet                    Print only problems and the summary line
+      --counters                 Linux: instructions, IPC, branch and cache misses per op,
+                                 where the kernel allows perf_event_open
       --zero-alloc               Treat every benchmark as @zero_alloc
       --untimed-allocs           Count allocations in one untimed batch after sampling (default)
       --timed-allocs             Count allocations in every timed sample, which adds the
@@ -206,6 +209,7 @@ _Cli_Flags :: struct {
 	batch_size:               int,
 	test:                     bool,
 	quiet:                    bool,
+	counters:                 bool,
 	opt:                      string,
 	microarch:                string,
 	no_bounds_check:          bool,
@@ -435,6 +439,7 @@ parse_cli_args :: proc(
 	opts.batch_size = f.batch_size if f.batch_size != UNSET else 0
 	opts.test_mode = f.test
 	opts.quiet = f.quiet || f.q
+	opts.counters = f.counters
 	opts.list_json = f.list_json
 	opts.samples = f.samples if f.samples != UNSET else 0
 	opts.warmup_ms = f.warmup if f.warmup != UNSET else -1
@@ -1540,6 +1545,9 @@ _runtime_args :: proc(
 	}
 	if opts.quiet {
 		append(&args, "-q")
+	}
+	if opts.counters {
+		append(&args, "--counters")
 	}
 	if opts.samples > 0 {
 		append(&args, "--samples", fmt.aprintf("%d", opts.samples, allocator = allocator))
