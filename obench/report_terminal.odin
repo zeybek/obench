@@ -353,6 +353,21 @@ _notes_cell :: proc(s: ^Suite, r: Result, p: _Palette) -> string {
 		fmt.sbprintf(&sb, "%s[near timer resolution]%s ", p.yellow, p.reset)
 	}
 
+	// Work that takes no longer than an empty loop was most likely optimized away. Threads
+	// share the work of a parallel benchmark, so its time per operation can be shorter.
+	if s.empty_loop_ns > 0 &&
+	   r.stats.clamped_samples == 0 &&
+	   !(r.has_threads && r.threads > 1) &&
+	   r.stats.p50_ns < 1.2 * s.empty_loop_ns {
+		fmt.sbprintf(&sb, "%s[near empty loop]%s ", p.yellow, p.reset)
+	}
+	if r.stats.trend_pct != 0 {
+		fmt.sbprintf(&sb, "%s[drifts %+.0f%%]%s ", p.yellow, r.stats.trend_pct, p.reset)
+	}
+	if r.stats.modes > 1 {
+		fmt.sbprintf(&sb, "%s[%d modes]%s ", p.yellow, r.stats.modes, p.reset)
+	}
+
 	if r.zero_alloc_failed {
 		fmt.sbprintf(&sb, "%s[FAIL: @zero_alloc]%s", p.red, p.reset)
 	}
@@ -376,9 +391,13 @@ write_terminal_report :: proc(w: io.Writer, s: ^Suite) {
 		return
 	}
 
+	empty_loop := ""
+	if s.empty_loop_ns > 0 {
+		empty_loop = fmt.tprintf(", empty loop %s", format_duration_ns(s.empty_loop_ns))
+	}
 	fmt.wprintf(
 		w,
-		"\n%sobench:%s %s%s (%s/%s, -o:%v, timer overhead %.1f ns, resolution %.1f ns)%s\n",
+		"\n%sobench:%s %s%s (%s/%s, -o:%v, timer overhead %.1f ns, resolution %.1f ns%s)%s\n",
 		p.bold,
 		p.reset,
 		p.dim,
@@ -388,6 +407,7 @@ write_terminal_report :: proc(w: io.Writer, s: ^Suite) {
 		ODIN_OPTIMIZATION_MODE,
 		s.clock.overhead_ns,
 		s.clock.resolution_ns,
+		empty_loop,
 		p.reset,
 	)
 	when ODIN_OPTIMIZATION_MODE == .None || ODIN_OPTIMIZATION_MODE == .Minimal {
@@ -417,6 +437,14 @@ write_terminal_report :: proc(w: io.Writer, s: ^Suite) {
 			p.yellow,
 			p.reset,
 		)
+	}
+
+	for note in machine_notes(s.machine_state, _logical_cores()) {
+		if note.warning {
+			fmt.wprintf(w, "%swarning:%s %s\n", p.yellow, p.reset, note.text)
+		} else {
+			fmt.wprintf(w, "%snote:%s %s\n", p.dim, p.reset, note.text)
+		}
 	}
 
 	if len(s.results) == 0 {

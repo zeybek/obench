@@ -259,6 +259,15 @@ grep -q "PASS: 6 benchmark(s)" "$WORK/test_mode.txt" || fail "expected --test to
 "$OBENCH" list examples/sorting --json > "$WORK/list.json"
 grep -q '"in_place_sort::slice_sort\[128\]"' "$WORK/list.json" || fail "expected full names in list --json"
 
+step "the empty loop, the machine fields, and a baseline from another CPU"
+"$OBENCH" examples/sorting -n 5 -w 2 --no-color --json "$WORK_N/cpu_a.json" > "$WORK/cpu_a.txt"
+grep -q ", empty loop " "$WORK/cpu_a.txt" || fail "expected the empty loop in the header"
+grep -q '"empty_loop_ns": [0-9]' "$WORK/cpu_a.json" || fail "expected clock.empty_loop_ns in the report"
+grep -q '"effective_samples": ' "$WORK/cpu_a.json" || fail "expected effective_samples in the report"
+sed 's/"cpu": "[^"]*"/"cpu": "Another CPU"/' "$WORK/cpu_a.json" > "$WORK/cpu_b.json"
+"$OBENCH" examples/sorting -n 5 -w 2 --no-color --baseline "$WORK_N/cpu_b.json" >/dev/null 2> "$WORK/cpu_err.txt"
+grep -q "was measured on Another CPU" "$WORK/cpu_err.txt" || fail "expected a warning about the baseline's CPU"
+
 step "nothing was written into the source tree"
 AFTER="$(snapshot)"
 [ "$BEFORE" = "$AFTER" ] || fail "files under examples/ changed: $(diff <(echo "$BEFORE") <(echo "$AFTER") || true)"

@@ -36,7 +36,13 @@
       "properties": {
         "cpu": { "type": "string" },
         "cores": { "type": "integer", "minimum": 0 },
-        "label": { "type": "string" }
+        "label": { "type": "string" },
+        "governor": { "type": "string" },
+        "boost": { "enum": ["on", "off", ""] },
+        "smt": { "enum": ["on", "off", ""] },
+        "load_avg": { "type": "number", "minimum": 0 },
+        "on_battery": { "type": "boolean" },
+        "vm": { "type": "boolean" }
       }
     },
     "build": {
@@ -63,7 +69,8 @@
       "properties": {
         "overhead_ns": { "type": "number", "minimum": 0 },
         "overhead_cycles": { "type": "number", "minimum": 0 },
-        "resolution_ns": { "type": "number", "minimum": 0 }
+        "resolution_ns": { "type": "number", "minimum": 0 },
+        "empty_loop_ns": { "type": "number", "minimum": 0 }
       }
     },
     "geomean_ns": { "type": "number", "minimum": 0 },
@@ -111,7 +118,11 @@
         "zero_alloc_failed": { "type": "boolean" },
         "clamped_samples": { "type": "integer", "minimum": 0 },
         "windows_per_sample": { "type": "number", "minimum": 0 },
-        "overhead_share": { "type": "number", "minimum": 0, "maximum": 1 }
+        "overhead_share": { "type": "number", "minimum": 0, "maximum": 1 },
+        "autocorrelation": { "type": "number", "minimum": -1, "maximum": 1 },
+        "effective_samples": { "type": "number", "minimum": 0 },
+        "trend_pct": { "type": "number" },
+        "modes": { "type": "integer", "minimum": 0 }
       }
     },
     "custom_metric": {

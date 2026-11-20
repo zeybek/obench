@@ -71,7 +71,11 @@ def sample_entry(v):
     # A value on a fence counts as an outlier or not depending on the last digit of the fence.
     on_fence = any(abs(x - f) <= 1e-9 * abs(f) for x in v for f in fences)
     std = float(np.std(v, ddof=1)) if n > 1 else 0.0
-    ci95 = float(stats.t.ppf(0.975, n - 1) * std / math.sqrt(n)) if n > 1 else 0.0
+    # Over the samples they are worth: obench's effective_sample_count of their lag-1
+    # autocorrelation, in the order they were drawn.
+    r = min(max(lag1(v), 0.0), 0.95)
+    n_eff = min(max(n * (1 - r) / (1 + r), 2.0), float(n)) if n > 1 else float(n)
+    ci95 = float(stats.t.ppf(0.975, n_eff - 1) * std / math.sqrt(n_eff)) if n > 1 else 0.0
     return {
         "values": [float(x) for x in v],
         "min": float(v.min()),
