@@ -112,7 +112,7 @@ A baseline that can't be compared with the run exits with status 3 instead, so a
 
 `obench export --format bmf|gab|gbench|jsonl <report.json>` converts a report for [Bencher](https://bencher.dev/), [github-action-benchmark](https://github.com/benchmark-action/github-action-benchmark) (`customSmallerIsBetter`), tools that read Google Benchmark's JSON, or a JSONL history file with one line per benchmark.
 
-Allocation counts are exact, so `--fail-on-alloc-regression` makes a gate that holds even on a noisy runner: it fails when a benchmark allocates more per operation, heap or temp, count or bytes, than in the baseline.
+Allocation counts are exact, so `--fail-on-alloc-regression` makes a gate that holds even on a noisy runner: it fails when a benchmark allocates more per operation, heap or temp, count or bytes, than in the baseline. On Linux with Valgrind installed, `obench --instructions --save-baseline main.json` and `obench --instructions --baseline main.json --fail-on-regression` do the same for instructions per operation, which Cachegrind counts exactly.
 
 For a job that only checks that the benchmarks still work, `obench --test` runs each one once, with its `@zero_alloc` and allocation checks, and measures nothing. `--max-time 200ms` and `--min-sample-time 500us` shorten a real run, `-f` takes a regular expression, `--skip` and `--exact` narrow it further, and `-q` prints only problems and the summary.
 
