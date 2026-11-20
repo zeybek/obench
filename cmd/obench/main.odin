@@ -25,6 +25,7 @@ EXIT_BASELINE :: obench.EXIT_BASELINE
 Subcommand :: enum {
 	Run,
 	Compare,
+	AB,
 	Export,
 	List,
 	Version,
@@ -34,8 +35,15 @@ Subcommand :: enum {
 CLI_Options :: struct {
 	subcommand:               Subcommand,
 	target_path:              string,
-	compare_old:              string,
+	compare_old:              string, // The first report of each side
 	compare_new:              string,
+	// Every report of each side; several are combined (`obench compare a1 a2 -- b1 b2`).
+	compare_old_files:        []string,
+	compare_new_files:        []string,
+	// `obench ab`: the two directories, and how many times each one runs.
+	ab_baseline:              string,
+	ab_candidate:             string,
+	rounds:                   int,
 	export_format:            Export_Format,
 	export_path:              string,
 	filter:                   string,
@@ -112,6 +120,11 @@ USAGE:
   obench [run] [dir] [options]          Discover and run benchmarks under dir (default: .)
   obench list [dir] [--json]            List discovered benchmarks without running them
   obench compare <old.json> <new.json>  Compare two JSON reports in benchstat style
+  obench compare <old.json>... -- <new.json>...
+                                        Compare several reports per side, combined
+  obench ab <baseline dir> <candidate dir> [--rounds 6]
+                                        Build both, run them alternately in random order,
+                                        and compare the two sides on this machine
   obench export --format <format> <report.json>
                                         Convert a JSON report for other tools: bmf (Bencher),
                                         gab (github-action-benchmark), gbench (Google
@@ -220,6 +233,7 @@ _Cli_Flags :: struct {
 	counters:                 bool,
 	instructions:             bool,
 	count:                    int,
+	rounds:                   int,
 	opt:                      string,
 	microarch:                string,
 	no_bounds_check:          bool,
@@ -284,6 +298,8 @@ parse_cli_args :: proc(
 			opts.subcommand = .Run
 		case "compare", "diff":
 			opts.subcommand = .Compare
+		case "ab":
+			opts.subcommand = .AB
 		case "export":
 			opts.subcommand = .Export
 		case "list":
@@ -294,6 +310,7 @@ parse_cli_args :: proc(
 			opts.subcommand = .Help
 		}
 		if args[0] == "run" ||
+		   args[0] == "ab" ||
 		   args[0] == "compare" ||
 		   args[0] == "diff" ||
 		   args[0] == "export" ||
@@ -314,7 +331,33 @@ parse_cli_args :: proc(
 		batch_size = UNSET,
 		pin        = UNSET,
 		count      = UNSET,
+		rounds     = UNSET,
 		threshold  = 2.0,
+	}
+	// `compare a1.json a2.json -- b1.json b2.json`: the reports after `--` are the new side.
+	// Options go before `--`; one after it can't take a separate value.
+	has_new_side := false
+	if opts.subcommand == .Compare {
+		for arg, i in rest {
+			if arg != "--" {
+				continue
+			}
+			before := make([dynamic]string, context.temp_allocator)
+			after := make([dynamic]string, allocator)
+			append(&before, ..rest[:i])
+			for a in rest[i + 1:] {
+				if strings.has_prefix(a, "-") {
+					append(&before, a)
+				} else {
+					append(&after, a)
+				}
+			}
+			rest = before[:]
+			// Owned by `opts` from here, so `destroy_cli_options` frees it on every path.
+			opts.compare_new_files = after[:]
+			has_new_side = true
+			break
+		}
 	}
 	// `list --json` prints the list as JSON; elsewhere `--json` takes a file name.
 	if opts.subcommand == .List {
@@ -384,6 +427,8 @@ parse_cli_args :: proc(
 		return opts, "--threshold expects a positive number"
 	case f.pin != UNSET && f.pin < 0:
 		return opts, "--pin expects a CPU number, 0 or more"
+	case f.rounds != UNSET && f.rounds < 2:
+		return opts, "--rounds expects 2 or more"
 	case f.count != UNSET && f.count < 1:
 		return opts, "--count expects a positive number of processes"
 	case f.count > 1 && (f.md != "" || f.csv != "" || f.spall != ""):
@@ -461,6 +506,7 @@ parse_cli_args :: proc(
 	opts.counters = f.counters
 	opts.instructions = f.instructions
 	opts.count = f.count if f.count != UNSET else 1
+	opts.rounds = f.rounds if f.rounds != UNSET else DEFAULT_AB_ROUNDS
 	opts.list_json = f.list_json
 	opts.samples = f.samples if f.samples != UNSET else 0
 	opts.warmup_ms = f.warmup if f.warmup != UNSET else -1
@@ -488,12 +534,28 @@ parse_cli_args :: proc(
 	positionals := f.overflow[:]
 	switch opts.subcommand {
 	case .Compare:
-		if len(positionals) != 2 {
+		switch {
+		case has_new_side:
+			if len(positionals) == 0 || len(opts.compare_new_files) == 0 {
+				return opts,
+					"compare expects reports on both sides of --: obench compare <old.json>... -- <new.json>..."
+			}
+			opts.compare_old_files = slice.clone(positionals, allocator)
+		case len(positionals) != 2:
 			return opts,
-				"compare expects exactly two JSON files: obench compare <old.json> <new.json>"
+				"compare expects two JSON files, or several on each side of --: obench compare <old.json> <new.json>"
+		case:
+			opts.compare_old_files = slice.clone(positionals[:1], allocator)
+			opts.compare_new_files = slice.clone(positionals[1:], allocator)
 		}
-		opts.compare_old = positionals[0]
-		opts.compare_new = positionals[1]
+		opts.compare_old = opts.compare_old_files[0]
+		opts.compare_new = opts.compare_new_files[0]
+	case .AB:
+		if len(positionals) != 2 {
+			return opts, "ab expects two directories: obench ab <baseline dir> <candidate dir>"
+		}
+		opts.ab_baseline = positionals[0]
+		opts.ab_candidate = positionals[1]
 	case .Export:
 		format, ok := parse_export_format(f.format)
 		if !ok {
@@ -518,6 +580,8 @@ parse_cli_args :: proc(
 }
 
 destroy_cli_options :: proc(opts: ^CLI_Options) {
+	delete(opts.compare_old_files)
+	delete(opts.compare_new_files)
 	delete(opts.collections)
 	delete(opts.defines)
 	delete(opts.extra_linker_flags)
@@ -2248,28 +2312,14 @@ main :: proc() {
 		return
 
 	case .Compare:
-		passed, err := obench.compare_baseline_files(
-			opts.compare_old,
-			opts.compare_new,
-			opts.threshold_pct,
-			!opts.no_color && obench.stdout_wants_color(),
-			opts.fail_on_regression,
-			opts.fail_on_alloc_regression,
-		)
-		if err != nil {
-			fmt.eprintfln(
-				"obench compare: could not read '%s' or '%s' (%v)",
-				opts.compare_old,
-				opts.compare_new,
-				err,
-			)
-			os.exit(EXIT_FAILURE)
+		if code := run_compare(opts.compare_old_files, opts.compare_new_files, opts); code != 0 {
+			os.exit(code)
 		}
-		if (opts.md_path != "" || opts.json_path != "") && !write_compare_outputs(opts) {
-			os.exit(EXIT_FAILURE)
-		}
-		if !passed {
-			os.exit(compare_exit_code(opts))
+		return
+
+	case .AB:
+		if code := run_ab(opts); code != 0 {
+			os.exit(code)
 		}
 		return
 

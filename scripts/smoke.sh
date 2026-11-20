@@ -287,6 +287,22 @@ set +e
 set -e
 [ "$code" -eq 1 ] || fail "expected --count to catch a 10x slowdown, got exit $code"
 
+step "compare combines several reports per side, and ab alternates two trees"
+"$OBENCH" compare "$WORK_N/count.json" "$WORK_N/count.json" -- "$WORK_N/count.json" --no-color \
+  --fail-on-regression > "$WORK/sides.txt"
+grep -q "count.json [^ ]*count.json vs" "$WORK/sides.txt" || fail "expected both reports of the old side in the header"
+for side in ab_fast ab_slow; do
+  mkdir -p "$WORK/$side/regress"
+  cp "$WORK/regress/regress_bench.odin" "$WORK/$side/regress/"
+done
+sed 's/#config(WORK, 1000)/10000/' "$WORK/regress/regress_bench.odin" > "$WORK/ab_slow/regress/regress_bench.odin"
+set +e
+"$OBENCH" ab "$WORK_N/ab_fast" "$WORK_N/ab_slow" --collection "libs=$ROOT_N" -n 10 -w 20 --no-color \
+  --fail-on-regression > "$WORK/ab.txt"; code=$?
+set -e
+[ "$code" -eq 1 ] || fail "expected ab to catch a 10x slowdown, got exit $code"
+grep -q "round 6 of 6" "$WORK/ab.txt" || fail "expected 6 rounds by default"
+
 step "nothing was written into the source tree"
 AFTER="$(snapshot)"
 [ "$BEFORE" = "$AFTER" ] || fail "files under examples/ changed: $(diff <(echo "$BEFORE") <(echo "$AFTER") || true)"
