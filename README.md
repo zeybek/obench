@@ -112,6 +112,8 @@ A baseline that can't be compared with the run exits with status 3 instead, so a
 
 Allocation counts are exact, so `--fail-on-alloc-regression` makes a gate that holds even on a noisy runner: it fails when a benchmark allocates more per operation, heap or temp, count or bytes, than in the baseline.
 
+For a job that only checks that the benchmarks still work, `obench --test` runs each one once, with its `@zero_alloc` and allocation checks, and measures nothing. `--max-time 200ms` and `--min-sample-time 500us` shorten a real run, `-f` takes a regular expression, `--skip` and `--exact` narrow it further, and `-q` prints only problems and the summary.
+
 Benchmarks can also run inside `odin test`: `run_test` runs a suite from a `@(test)` procedure and fails the test on a misused benchmark, a failed `@zero_alloc` check, or a regression.
 
 ## Examples

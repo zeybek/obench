@@ -100,6 +100,8 @@ suite_create :: proc(
 @(private = "file")
 _clone_config_strings :: proc(cfg: ^Config, allocator: runtime.Allocator) {
 	cfg.filter = strings.clone(cfg.filter, allocator)
+	cfg.skip = strings.clone(cfg.skip, allocator)
+	cfg.exact = strings.clone(cfg.exact, allocator)
 	cfg.baseline_load_path = strings.clone(cfg.baseline_load_path, allocator)
 	cfg.baseline_save_path = strings.clone(cfg.baseline_save_path, allocator)
 	cfg.json_export_path = strings.clone(cfg.json_export_path, allocator)
@@ -112,6 +114,8 @@ _clone_config_strings :: proc(cfg: ^Config, allocator: runtime.Allocator) {
 @(private = "file")
 _delete_config_strings :: proc(cfg: ^Config, allocator: runtime.Allocator) {
 	delete(cfg.filter, allocator)
+	delete(cfg.skip, allocator)
+	delete(cfg.exact, allocator)
 	delete(cfg.baseline_load_path, allocator)
 	delete(cfg.baseline_save_path, allocator)
 	delete(cfg.json_export_path, allocator)

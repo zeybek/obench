@@ -265,8 +265,21 @@ more per operation than in the baseline: more heap or temp allocations, or more 
 is no threshold and no test, and the table marks such a benchmark `[allocs grew]`. A baseline
 that holds none of a suite's benchmarks fails this gate too.
 
-A `--filter` that matches nothing writes no report files, so a typo can't replace a saved
-baseline with an empty one.
+Selecting benchmarks
+
+`--filter` runs the benchmarks whose full name contains the pattern, either as plain text or
+as a `core:text/regex` regular expression, so `-f 'odin_map\[(8|64)\]'` picks two parameters
+and `-f 'odin_map[64]'` still picks the one name it contains. `--skip` leaves out the names it
+matches the same way, and `--exact` runs the one benchmark with exactly that full name
+(`obench list --json` prints every full name). A selection that matches nothing writes no
+report files, so a typo can't replace a saved baseline with an empty one.
+
+`--max-time` and `--min-sample-time` set the time budget of a benchmark and the shortest
+sample at run time, like `--max-time 200ms --min-sample-time 500us`, and `--batch-size` fixes
+the iterations per sample instead of calibrating them. `--test` runs every benchmark once
+with one iteration, with the protocol, `@zero_alloc`, and allocation checks, but measures
+nothing, so it can't read or save a baseline; it is a quick check for a CI job. `-q` prints
+only the problems and the summary line.
 
 When the CLI runs several packages, `--json`, `--save-baseline`, `--csv`, and `--md` write one
 merged file, with the suite name on every entry. `--spall` writes one trace per package
@@ -284,8 +297,13 @@ Configuration
 Programs that call `default_config` (which `suite_create` does when no config is passed)
 pick up these environment variables. Command-line flags of the same name override them.
 
-	OBENCH_FILTER                    Same as --filter
+	OBENCH_FILTER, OBENCH_SKIP       Same as --filter and --skip
+	OBENCH_EXACT                     Same as --exact
 	OBENCH_SAMPLES, OBENCH_WARMUP_MS Sample count and warmup
+	OBENCH_MAX_TIME                  Same as --max-time
+	OBENCH_MIN_SAMPLE_TIME           Same as --min-sample-time
+	OBENCH_BATCH_SIZE                Same as --batch-size
+	OBENCH_TEST, OBENCH_QUIET        1 or true: same as --test and -q
 	OBENCH_THRESHOLD                 Same as --threshold
 	OBENCH_ZERO_ALLOC                1 or true to enable
 	OBENCH_UNTIMED_ALLOCS            0 or false: same as --timed-allocs

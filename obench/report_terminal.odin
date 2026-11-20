@@ -361,11 +361,20 @@ _notes_cell :: proc(s: ^Suite, r: Result, p: _Palette) -> string {
 
 /*
 Writes the terminal report (a tree of groups with timings, allocations, sparklines, Big-O
-estimates, and the suite summary) to `w`. Formatting uses `context.temp_allocator`.
+estimates, and the suite summary) to `w`. With `Config.quiet`, only the problems (see
+`suite_failure_messages`) and the summary line. Formatting uses `context.temp_allocator`.
 */
 write_terminal_report :: proc(w: io.Writer, s: ^Suite) {
 	p := _palette(s.config.color_output)
 	show_cycles := s.clock.has_cycle_counter
+
+	if s.config.quiet {
+		for msg in suite_failure_messages(s, context.temp_allocator) {
+			fmt.wprintf(w, "%s\n", msg)
+		}
+		_write_summary(w, s, p)
+		return
+	}
 
 	fmt.wprintf(
 		w,
@@ -396,6 +405,15 @@ write_terminal_report :: proc(w: io.Writer, s: ^Suite) {
 		fmt.wprintf(
 			w,
 			"%swarning:%s compiled with -debug; timings may not reflect release builds.\n",
+			p.yellow,
+			p.reset,
+		)
+	}
+
+	if s.config.test_mode {
+		fmt.wprintf(
+			w,
+			"%snote:%s --test ran every benchmark once with a batch of one iteration, so the times aren't measurements.\n",
 			p.yellow,
 			p.reset,
 		)

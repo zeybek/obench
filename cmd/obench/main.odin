@@ -39,8 +39,16 @@ CLI_Options :: struct {
 	export_format:            Export_Format,
 	export_path:              string,
 	filter:                   string,
+	skip:                     string,
+	exact:                    string,
 	samples:                  int,
 	warmup_ms:                int,
+	max_time:                 string, // As given; parse_cli_args checked it parses
+	min_sample_time:          string,
+	batch_size:               int,
+	test_mode:                bool,
+	quiet:                    bool,
+	list_json:                bool,
 	opt_mode:                 string,
 	microarch:                string,
 	no_bounds_check:          bool,
@@ -97,7 +105,7 @@ Allocation-aware micro-benchmarking for Odin.
 
 USAGE:
   obench [run] [dir] [options]          Discover and run benchmarks under dir (default: .)
-  obench list [dir]                     List discovered benchmarks without running them
+  obench list [dir] [--json]            List discovered benchmarks without running them
   obench compare <old.json> <new.json>  Compare two JSON reports in benchstat style
   obench export --format <format> <report.json>
                                         Convert a JSON report for other tools: bmf (Bencher),
@@ -122,9 +130,18 @@ DISCOVERY:
   line); several may share a line.
 
 RUN OPTIONS:
-  -f, --filter <substring>       Run only benchmarks whose full name contains the substring
+  -f, --filter <pattern>         Run only benchmarks whose full name contains the pattern, as
+                                 plain text or as a regular expression
+      --skip <pattern>           Skip benchmarks whose full name contains the pattern
+      --exact <name>             Run only the benchmark with exactly this full name
   -n, --samples <count>          Samples per benchmark (default: 50)
   -w, --warmup <ms>              Warmup per benchmark in milliseconds (default: 40)
+      --max-time <duration>      Sampling time budget per benchmark, like 200ms (default: 1200ms)
+      --min-sample-time <dur>    Shortest time of one sample, like 500us (default: 1ms)
+      --batch-size <count>       Iterations per sample, instead of calibrating them
+      --test                     Run every benchmark once with one iteration and every check,
+                                 without measuring it (no baseline)
+  -q, --quiet                    Print only problems and the summary line
       --zero-alloc               Treat every benchmark as @zero_alloc
       --untimed-allocs           Count allocations in one untimed batch after sampling (default)
       --timed-allocs             Count allocations in every timed sample, which adds the
@@ -175,8 +192,15 @@ package, 2 usage error (also a short flag together with its long form, like -n a
 _Cli_Flags :: struct {
 	overflow:                 [dynamic]string,
 	filter:                   string,
+	skip:                     string,
+	exact:                    string,
 	samples:                  int,
 	warmup:                   int,
+	max_time:                 string,
+	min_sample_time:          string,
+	batch_size:               int,
+	test:                     bool,
+	quiet:                    bool,
 	opt:                      string,
 	microarch:                string,
 	no_bounds_check:          bool,
@@ -208,6 +232,8 @@ _Cli_Flags :: struct {
 	w:                        int `args:"hidden"`,
 	o:                        string `args:"hidden"`,
 	v:                        bool `args:"hidden"`,
+	q:                        bool `args:"hidden"`,
+	list_json:                bool `args:"hidden"`,
 }
 
 /*
@@ -259,11 +285,20 @@ parse_cli_args :: proc(
 	// `min(int)` marks numeric flags the user didn't pass.
 	UNSET :: min(int)
 	f := _Cli_Flags {
-		samples   = UNSET,
-		n         = UNSET,
-		warmup    = UNSET,
-		w         = UNSET,
-		threshold = 2.0,
+		samples    = UNSET,
+		n          = UNSET,
+		warmup     = UNSET,
+		w          = UNSET,
+		batch_size = UNSET,
+		threshold  = 2.0,
+	}
+	// `list --json` prints the list as JSON; elsewhere `--json` takes a file name.
+	if opts.subcommand == .List {
+		renamed := make([]string, len(rest), context.temp_allocator)
+		for arg, i in rest {
+			renamed[i] = "--list-json" if arg == "--json" || arg == "-json" else arg
+		}
+		rest = renamed
 	}
 	parse_err := flags.parse(&f, rest, .Unix, allocator = allocator)
 	opts.collections = f.collection
@@ -325,6 +360,29 @@ parse_cli_args :: proc(
 		return opts, "--threshold expects a positive number"
 	case f.untimed_allocs && f.timed_allocs:
 		return opts, "--untimed-allocs and --timed-allocs can't be used together"
+	case f.batch_size != UNSET && f.batch_size <= 0:
+		return opts, "--batch-size expects a positive integer"
+	case f.test &&
+	     (f.baseline != "" ||
+			     f.save_baseline != "" ||
+			     f.fail_on_regression ||
+			     f.fail_on_alloc_regression):
+		return opts,
+			"--test runs every benchmark once without measuring it, so it can't be used with --baseline, --save-baseline, --fail-on-regression, or --fail-on-alloc-regression"
+	}
+	for d in ([]struct {
+			flag, value: string,
+		}{{"--max-time", f.max_time}, {"--min-sample-time", f.min_sample_time}}) {
+		if d.value == "" {
+			continue
+		}
+		if dur, ok := obench.parse_duration(d.value); !ok || dur <= 0 {
+			return opts, fmt.tprintf(
+				"%s expects a duration like 200ms, 500us or 1.5s, got '%s'",
+				d.flag,
+				d.value,
+			)
+		}
 	}
 	if f.opt != "" {
 		switch f.opt {
@@ -359,6 +417,14 @@ parse_cli_args :: proc(
 	}
 
 	opts.filter = f.filter
+	opts.skip = f.skip
+	opts.exact = f.exact
+	opts.max_time = f.max_time
+	opts.min_sample_time = f.min_sample_time
+	opts.batch_size = f.batch_size if f.batch_size != UNSET else 0
+	opts.test_mode = f.test
+	opts.quiet = f.quiet || f.q
+	opts.list_json = f.list_json
 	opts.samples = f.samples if f.samples != UNSET else 0
 	opts.warmup_ms = f.warmup if f.warmup != UNSET else -1
 	opts.threshold_pct = f.threshold
@@ -1430,7 +1496,7 @@ Package_Outputs :: struct {
 	match_baseline_suite: bool,
 }
 
-@(private = "file")
+@(private)
 _runtime_args :: proc(
 	opts: CLI_Options,
 	outputs: Package_Outputs,
@@ -1439,6 +1505,27 @@ _runtime_args :: proc(
 	args := make([dynamic]string, allocator)
 	if opts.filter != "" {
 		append(&args, "--filter", opts.filter)
+	}
+	if opts.skip != "" {
+		append(&args, "--skip", opts.skip)
+	}
+	if opts.exact != "" {
+		append(&args, "--exact", opts.exact)
+	}
+	if opts.max_time != "" {
+		append(&args, "--max-time", opts.max_time)
+	}
+	if opts.min_sample_time != "" {
+		append(&args, "--min-sample-time", opts.min_sample_time)
+	}
+	if opts.batch_size > 0 {
+		append(&args, "--batch-size", fmt.aprintf("%d", opts.batch_size, allocator = allocator))
+	}
+	if opts.test_mode {
+		append(&args, "--test")
+	}
+	if opts.quiet {
+		append(&args, "-q")
 	}
 	if opts.samples > 0 {
 		append(&args, "--samples", fmt.aprintf("%d", opts.samples, allocator = allocator))
@@ -2144,7 +2231,11 @@ main :: proc() {
 
 	code := 0
 	if opts.subcommand == .List {
-		list_packages(packages[:])
+		if opts.list_json {
+			list_packages_json(packages[:])
+		} else {
+			list_packages(packages[:])
+		}
 	} else {
 		code = run_all(packages[:], opts)
 	}
