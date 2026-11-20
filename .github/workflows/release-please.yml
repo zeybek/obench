@@ -9,6 +9,11 @@ name: Release
 # It runs only after CI has passed on a push to main, and only when that push is still the
 # head of main: release-please reads main's current head, so a later push whose CI hasn't
 # finished (or failed) must not be released on the strength of an earlier push's CI run.
+#
+# release-please pushes to the release PR with this workflow's token, and GitHub holds the
+# pull_request runs of such pushes until a maintainer approves them. So whenever it opens or
+# updates the PR, the release-pr-checks job starts CI, Lint and Links on the PR's branch with
+# workflow_dispatch, which the token may still do, and their checks show on the PR.
 
 on:
   workflow_run:
@@ -35,6 +40,8 @@ jobs:
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
+      prs_created: ${{ steps.release.outputs.prs_created }}
+      pr: ${{ steps.release.outputs.pr }}
     steps:
       - name: Check that the tested commit is still the head of main
         id: head
@@ -56,6 +63,25 @@ jobs:
         with:
           config-file: .github/release-please-config.json
           manifest-file: .github/.release-please-manifest.json
+
+  release-pr-checks:
+    name: Checks on the release PR
+    needs: release-please
+    # True when release-please opened the PR or pushed to it, not when it left it as it was.
+    if: needs.release-please.outputs.prs_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Start CI, Lint and Links on the release PR's branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ needs.release-please.outputs.pr }}
+        run: |
+          branch="$(jq -r .headBranchName <<< "$PR")"
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$branch" -f nightly=false
+          gh workflow run lint.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"
+          gh workflow run links.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"
 
   cli-binaries:
     name: CLI (${{ matrix.target }})
