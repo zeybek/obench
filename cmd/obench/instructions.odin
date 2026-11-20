@@ -40,9 +40,9 @@ Instruction_Report :: struct {
 Cachegrind twice, with N and 2N iterations (`--batch-size`, default 100) and nothing else
 (`Config.count_iterations`). (I(2N) - I(N)) / N is its instructions per operation: the
 setup outside the loop, the process start, and the one validating iteration cancel out.
-Returns the exit status: 1 when a benchmark failed or, with `--fail-on-regression`, got
-more instructions than `--threshold` allows over the baseline, and 3 when the baseline can't
-be compared.
+Returns the exit status: 1 when a benchmark failed, the baseline file can't be read, or, with
+`--fail-on-regression`, a benchmark got more instructions than `--threshold` allows over the
+baseline, and 3 when the gate's baseline can't be compared.
 */
 run_instructions :: proc(packages: []Discovered_Package, opts: CLI_Options) -> int {
 	if _, _, _, err := os.process_exec(
@@ -207,10 +207,10 @@ _print_and_gate_instructions :: proc(report: Instruction_Report, opts: CLI_Optio
 	code := 0
 	gate := opts.fail_on_regression
 	if opts.load_baseline != "" {
-		base, ok := _read_instruction_report(opts.load_baseline)
+		base, read_code := read_instruction_baseline(opts.load_baseline)
 		switch {
-		case !ok:
-			code = EXIT_BASELINE
+		case read_code != EXIT_SUCCESS:
+			code = read_code
 		case base.optimization != report.optimization ||
 		     base.os != report.os ||
 		     base.arch != report.arch:
@@ -286,7 +286,7 @@ _print_and_gate_instructions :: proc(report: Instruction_Report, opts: CLI_Optio
 		}
 	}
 	if !gate && code == EXIT_BASELINE {
-		code = 0 // Without a gate a baseline problem is only a warning.
+		code = 0 // Without a gate a baseline that can't be compared is only a warning.
 	}
 	if gate && code == 0 && regressions > 0 {
 		code = EXIT_FAILURE
@@ -294,17 +294,25 @@ _print_and_gate_instructions :: proc(report: Instruction_Report, opts: CLI_Optio
 	return code
 }
 
-@(private = "file")
-_read_instruction_report :: proc(path: string) -> (report: Instruction_Report, ok: bool) {
+/*
+Reads a report from `--instructions` to compare with. `code` is `EXIT_FAILURE` when the file
+can't be read or isn't JSON, so a misspelled path fails the run, and `EXIT_BASELINE` when it
+is another kind of report, which can be saved again.
+*/
+@(private)
+read_instruction_baseline :: proc(path: string) -> (report: Instruction_Report, code: int) {
 	data, err := os.read_entire_file(path, context.temp_allocator)
 	if err != nil {
 		fmt.eprintfln("obench: could not read baseline '%s' (%v)", path, err)
-		return
+		return {}, EXIT_FAILURE
 	}
-	if json.unmarshal(data, &report, allocator = context.temp_allocator) != nil ||
-	   report.format != INSTRUCTIONS_FORMAT {
+	if json.unmarshal(data, &report, allocator = context.temp_allocator) != nil {
+		fmt.eprintfln("obench: could not read baseline '%s' (not valid JSON)", path)
+		return {}, EXIT_FAILURE
+	}
+	if report.format != INSTRUCTIONS_FORMAT {
 		fmt.eprintfln("obench: '%s' isn't a report from --instructions", path)
-		return
+		return {}, EXIT_BASELINE
 	}
-	return report, true
+	return report, EXIT_SUCCESS
 }

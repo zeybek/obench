@@ -7,7 +7,7 @@ obench is before 1.0. This page says what counts as its public surface and how t
 These are what you can build on, and what a release has to call out when it changes them:
 
 - the exported declarations of the `obench` package: every procedure, type, constant and field whose name doesn't start with `_` and that isn't marked `@(private)`
-- the CLI's subcommands, flags and exit statuses (0 success, 1 a failed benchmark, regression or build, 2 a usage error, 3 a baseline that can't be compared with the run)
+- the CLI's subcommands, flags and exit statuses (0 success, 1 a failed benchmark, regression or build, or a baseline file that can't be read, 2 a usage error, 3 a baseline that can't be compared with the run)
 - the `OBENCH_*` environment variables and the `#config(OBENCH_*)` defaults
 - the benchmark conventions: `bench_<name>` and `bench_<group>__<name>` procedures, and the `@group`, `@params`, `@threads` and `@zero_alloc` annotations
 - the JSON report: its fields and `format_version`, and the CSV report's columns

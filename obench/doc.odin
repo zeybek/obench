@@ -243,23 +243,23 @@ fields they don't know, and removing or changing a field bumps `format_version` 
 STABILITY.md).
 
 `--fail-on-regression` turns regressions into exit status 1, which makes it usable as a CI
-gate. A baseline that can't be compared with the run gives exit status 3 instead
-(`EXIT_BASELINE`), so a CI job can tell "this got slower" from "save the baseline again".
-That is a baseline file that can't be read, so a typo in the path doesn't pass silently, and
-under `--fail-on-regression` or `--fail-on-alloc-regression` one that holds none of a
-suite's benchmarks (a renamed suite, or the wrong file). Under `--fail-on-regression` it is
-also a baseline built with another optimization mode, OS, architecture, `-microarch`, or
-bounds-check setting, because its timings can't be compared: one saved from an `-o:none`
-build would make every benchmark look faster and hide a real regression. The same goes for a
-baseline that counted allocations the other way when it has a benchmark that allocates;
-reports older than format version 4 counted them in every timed sample, so against one of
-them those benchmarks look faster. Save the baseline again, or run with `--timed-allocs`
-until then. Time regressions against such a baseline don't count, but a benchmark that
-failed or allocates more still gives 1. A program with its own `main` gets the same status
-from `suite_exit_code`. `obench compare` checks the two reports the same way
-(`comparison_exit_code`). Its `--fail-on-regression` also fails when a benchmark that worked
-in the baseline reports an error in the candidate; benchmarks found on one side only are
-listed but don't fail it, unless no benchmark is on both sides.
+gate. A baseline file that can't be read gives 1 too, with or without a gate, so a typo in
+the path doesn't pass silently. A baseline that can't be compared with the run gives exit
+status 3 instead (`EXIT_BASELINE`), so a CI job can tell "this got slower" from "save the
+baseline again". Under `--fail-on-regression` or `--fail-on-alloc-regression`, that is a
+baseline that holds none of a suite's benchmarks (a renamed suite, or the wrong file). Under
+`--fail-on-regression` it is also a baseline built with another optimization mode, OS,
+architecture, `-microarch`, or bounds-check setting, because its timings can't be compared:
+one saved from an `-o:none` build would make every benchmark look faster and hide a real
+regression. The same goes for a baseline that counted allocations the other way when it has a
+benchmark that allocates; reports older than format version 4 counted them in every timed
+sample, so against one of them those benchmarks look faster. Save the baseline again, or run
+with `--timed-allocs` until then. Time regressions against such a baseline don't count, but a
+benchmark that failed or allocates more still gives 1. A program with its own `main` gets the
+same status from `suite_exit_code`. `obench compare` checks the two reports the same way
+(`comparison_exit_code`). Its `--fail-on-regression` also fails when a benchmark that worked in
+the baseline reports an error in the candidate; benchmarks found on one side only are listed
+but don't fail it, unless no benchmark is on both sides.
 `--md` and `--json` write the comparison as well: Markdown with a one-line verdict first and
 the table in a `<details>` block, for a job summary or a pull request comment, and JSON with
 the summary and every benchmark's verdict, for a bot (`write_comparison_markdown`,

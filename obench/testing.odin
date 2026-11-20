@@ -123,7 +123,7 @@ suite_failure_messages :: proc(s: ^Suite, allocator := context.temp_allocator) -
 		append(
 			&out,
 			fmt.aprintf(
-				"obench suite %q: %d trace or report file(s) could not be written; see the warnings above",
+				"obench suite %q: %d file(s) could not be read or written; see the warnings above",
 				s.name,
 				s.failed_io,
 				allocator = allocator,
