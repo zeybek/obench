@@ -176,6 +176,15 @@ set -e
 [ "$code" -eq 1 ] || fail "expected exit 1 for a build failure, got $code"
 [ ! -e "$WORK/stale_b.json" ] || fail "the old --json report was copied to --save-baseline"
 
+step "a library of another version than the CLI gets a warning"
+mkdir -p "$WORK/oldlib"
+cp -R "$ROOT/obench" "$WORK/oldlib/obench"
+sed 's/^VERSION :: "[^"]*"/VERSION :: "0.0.1"/' "$ROOT/obench/doc.odin" > "$WORK/oldlib/obench/doc.odin"
+"$OBENCH" "$WORK_N/dup/a" --collection "libs=$(native_path "$WORK/oldlib")" -n 5 -w 2 --no-color \
+  >/dev/null 2> "$WORK/version_err.txt"
+grep -q "but the obench library in .* is 0.0.1" "$WORK/version_err.txt" ||
+  fail "expected a warning about the library's version"
+
 step "--ols adds collections from ols.json only when requested and prints them"
 mkdir -p "$WORK/ols_test/dep/helper" "$WORK/ols_test/bench"
 cat > "$WORK/ols_test/ols.json" <<'JSON'
