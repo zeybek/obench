@@ -136,8 +136,9 @@ RUN OPTIONS:
                                  allocations the other way (see --timed-allocs)
       --fail-on-alloc-regression Exit with status 1 if a benchmark allocates more per operation
                                  (heap or temp, count or bytes) than in the baseline
-      --json <file>              Write a JSON report
-      --md <file>                Write a GitHub Markdown report
+      --json <file>              Write a JSON report (with compare: the comparison as JSON)
+      --md <file>                Write a GitHub Markdown report (with compare: the comparison,
+                                 for a job summary or a PR comment)
       --csv <file>               Write an RFC 4180 CSV report
       --spall <file>             Write a core:prof/spall trace (one file per package)
       --no-color                 Disable ANSI colors. They are also off when NO_COLOR is set
@@ -2049,6 +2050,9 @@ main :: proc() {
 				opts.compare_new,
 				err,
 			)
+			os.exit(EXIT_FAILURE)
+		}
+		if (opts.md_path != "" || opts.json_path != "") && !write_compare_outputs(opts) {
 			os.exit(EXIT_FAILURE)
 		}
 		if !passed {
