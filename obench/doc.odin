@@ -24,6 +24,19 @@ Features:
   shift intervals, suite geomean
 - `core:prof/spall` traces, JSON baselines, CSV, Markdown, and self-contained HTML reports
 
+Documentation
+
+This comment is the reference. The guides are in the docs folder of the repository:
+
+- Your first benchmark: https://github.com/zeybek/obench/blob/main/docs/tutorial.md
+- Gate a pull request on performance: https://github.com/zeybek/obench/blob/main/docs/how-to/ci-gate.md
+- Run benchmarks inside `odin test`: https://github.com/zeybek/obench/blob/main/docs/how-to/odin-test.md
+- Add obench to a project: https://github.com/zeybek/obench/blob/main/docs/how-to/vendoring.md
+- How obench decides that something changed: https://github.com/zeybek/obench/blob/main/docs/explanation/statistics.md
+- How allocations are counted: https://github.com/zeybek/obench/blob/main/docs/explanation/allocations.md
+- The clock, its overhead, and the other counters: https://github.com/zeybek/obench/blob/main/docs/explanation/timer.md
+- Migration notes for every breaking release: https://github.com/zeybek/obench/blob/main/docs/migration.md
+
 Install
 
 This folder is the library. Copy it into your project, for example as `libs/obench`, and
@@ -128,9 +141,10 @@ directory, imports your package from there, and deletes it afterwards. Nothing i
 into your source tree. The compiler comes from `$ODIN` when it is set, otherwise from `PATH`.
 
 Exit status is 0 on success, 1 when a benchmark, a gate, or a build failed, or a directory
-with `*_bench.odin` files couldn't be parsed (the other packages still run), and 2 for usage
-errors such as an unknown option, or a short flag given together with its long form
-(`-n 5 --samples 100`). An annotation comment separated from its procedure by a blank line
+with `*_bench.odin` files couldn't be parsed (the other packages still run), 2 for usage
+errors such as an unknown option, or a short flag given together with its long form (`-n 5
+--samples 100`), and 3 when the baseline can't be compared with the run (see Comparing
+runs). An annotation comment separated from its procedure by a blank line
 is not read, so the CLI warns about it. `obench help` lists the options.
 
 A program can also run benchmarks from its own `main`. `suite_create` reads the `OBENCH_*`
@@ -171,74 +185,25 @@ Reading the report
 Each sample is one calibrated batch (at least 1 ms by default), and the columns are per
 operation. `x faster` and `x slower` compare each benchmark with the first one in its group
 for the same parameter, and only appear when the 95% confidence interval of the difference
-lies beyond 3%. Smaller or noisy differences show as `~1.04x (noise)`. The
-sparkline is a histogram of the samples between the fastest and p99. `[near timer
-resolution]` marks a benchmark whose timed windows are less than 100 clock ticks long (an
-expensive `iter_batched` setup can cut calibration short, and every `pause`/`resume` pair
-starts a new window), so its times are quantized by 1% or more.
+lies beyond 3%. Smaller or noisy differences show as `~1.04x (noise)`. The sparkline is a
+histogram of the samples between the fastest and p99. `allocs / bytes` counts allocator
+calls that obtain memory, resizes included, in one untimed batch after the samples
+(https://github.com/zeybek/obench/blob/main/docs/explanation/allocations.md).
 
-Every timed window also costs one clock overhead, which obench subtracts from the sample.
-`[clamped: 4/50 samples]` means 4 samples came out below that overhead and were counted as 0,
-so the times shown are too low, and `[overhead-dominated]` means the overhead was more than
-10% of the raw time. Both usually come from calling `pause`/`resume` around work that is
-smaller than the clock itself: time a bigger piece of work, or move the setup out of the loop.
+The notes flag results to doubt. `[near timer resolution]`, `[clamped: 4/50 samples]`, and
+`[overhead-dominated]` mean the clock was too coarse or too costly for the timed windows,
+and `[near empty loop]` that the work was most likely optimized away
+(https://github.com/zeybek/obench/blob/main/docs/explanation/timer.md). `[drifts +8%]` and
+`[2 modes]` mean the machine changed speed during the run
+(https://github.com/zeybek/obench/blob/main/docs/explanation/statistics.md). The header
+warns about a CPU governor other than `performance`, battery power, a high load average, and
+a baseline from another CPU.
 
-After the benchmarks, obench times an empty `for obench.step(b) {}` loop and shows it in the
-header (`empty loop 700.5 ps` on an M2). `[near empty loop]` marks a single-threaded benchmark
-whose median is within 1.2 times of it: the compiler most likely removed the work, so pass
-its input and result through `black_box`. Samples taken one after another aren't
-independent, since one slow stretch of the machine covers several of them, so `ci95_ns`
-counts only the samples they are worth (`effective_samples`, from the lag-1
-`autocorrelation`). `[drifts +8%]` means the times moved steadily over the run, by that much
-from the first sample to the last (see `sample_trend`), and `[2 modes]` that the samples fell
-into separate groups (see `count_modes`); both usually mean the machine changed speed while
-it ran. The JSON report has all four for every benchmark, and the empty loop as
-`clock.empty_loop_ns`.
-
-The header also warns about a machine that makes timings less steady: a CPU governor other
-than `performance`, battery power, or a load average of half the cores or more, on Linux, and
-the load on macOS. It notes turbo clocks and a virtual machine, and the JSON report records
-all of it in `machine`. A baseline measured on another CPU model, or under another
-`--machine` label, gets a warning too. `--pin <cpu>` runs the benchmarks on one logical CPU
-on Linux and Windows, so the scheduler doesn't move them between cores; threads that
-`run_parallel` starts share that CPU on Linux.
-
-`allocs / bytes` counts allocator calls that obtain memory, which includes resizes: building
-a 64-item dynamic array from capacity 16 shows `3.0 / 512 B` (one allocation, two resizes).
-Temp-only allocations show as `0 (tmp 3.0/512 B)`. The counts come from one more batch
-that runs untimed after the samples, so counting adds nothing to the measured time. A
-`@zero_alloc` benchmark still has its heap checked in every timed sample, which costs
-nothing until it allocates. `--timed-allocs` (or `OBENCH_UNTIMED_ALLOCS=0`) counts in every
-timed sample instead, and then benchmarks that allocate also pay for the counting: in
-`examples/allocators` on an M2, `heap` took 14% longer and `temp_allocator` 19% longer.
-
-On Linux, `--counters` reads the CPU's hardware counters around every sample with
-`perf_event_open` and adds per-operation columns for instructions, instructions per cycle,
-and branch and cache misses (`Stats.counters`, and `instructions`, `cycles`,
-`branch_misses`, and `cache_misses` in the JSON). Instructions barely move between runs, and
-the misses often explain why something got slower. The counters cover the whole batch,
-including the untimed work between `pause` and `resume`, and only the thread that runs the
-benchmark, so a parallel benchmark gets none. Where the kernel doesn't allow them
-(`perf_event_paranoid` above 2, a container's seccomp filter, or a VM without a PMU) the
-header says why and the run goes on without them. `counter_group_open` is the same thing for
-your own code.
-
-On Linux with Valgrind, `obench --instructions` counts the instructions per operation
-exactly, a number that can gate on a shared CI runner where time can't. It builds each
-package once and runs every selected benchmark alone under Cachegrind twice, with N and 2N
-iterations (`--batch-size`, 100 by default), and reports (I(2N) - I(N)) / N, so the process
-start and the setup outside the loop cancel out. Each run does nothing but those iterations
-(`Config.count_iterations`): no clock calibration, warmup, statistics, or output, so the
-count is the same every time. Like the hardware counters, it includes the work between
-`pause` and `resume`, and a benchmark that draws random input averages over the inputs that
-N iterations draw, so another N can give another count. `--save-baseline` and `--json` write
-the counts, and `--baseline` with `--fail-on-regression` fails when a benchmark needs more
-than `--threshold` percent more instructions, with exit status 3 for a baseline that can't
-be compared. Parallel benchmarks and packages with their own `main` are skipped.
-
-On x86 there is also a `cycles` column with time-stamp counter ticks, which run at the CPU's
-nominal frequency. On other architectures `read_cycle_counter` reads a fixed-frequency timer
-(24 MHz on Apple Silicon), so the column is hidden there.
+On Linux, `--counters` adds hardware counters per operation (instructions, instructions per
+cycle, and branch and cache misses) where the kernel allows `perf_event_open`, and on Linux
+with Valgrind, `obench --instructions` counts instructions per operation exactly under
+Cachegrind. `--pin <cpu>` runs the benchmarks on one logical CPU on Linux and Windows. On
+x86 there is also a `cycles` column with time-stamp counter ticks.
 
 Comparing runs
 
@@ -251,17 +216,14 @@ reports without running anything:
 
 A change counts as a regression only when its whole 95% confidence interval lies above
 `--threshold` percent (2% by default). The change is the Hodges-Lehmann estimate, the median
-of the ratios between every sample of one run and every sample of the other, with the
-distribution-free interval of the Mann-Whitney U test. The interval is exact up to 20
-samples a side, and above that it widens when consecutive samples move together (see
-`hodges_lehmann_shift`). It works on ranks, so a few very slow samples in either run can't
-hide a shift of the rest. `compare` prints the interval and the Mann-Whitney p-value, and
-under the summary the number of flags to expect from the noise between samples. That number
-doesn't cover a machine that ran at another speed between the two runs, which shifts every
-sample of one of them. Reports keep every sample for this (`samples_ns`, since format
-version 3), along with each sample's overhead-adjusted integer batch duration
-(`samples_batch_ns`, since format version 5) for downstream exact integer analysis. Against
-an older report without samples, Welch's t-test on the means is used instead.
+of the ratios between every sample of one run and every sample of the other, and its
+interval comes from the Mann-Whitney U test (`hodges_lehmann_shift`). `compare` prints the
+interval, the p-value, and under the summary the number of flags to expect from noise
+between samples. Reports keep every sample for this (`samples_ns`, since format version 3),
+along with each sample's overhead-adjusted integer batch duration (`samples_batch_ns`, since
+format version 5). Against an older report without samples, Welch's t-test on the means is
+used instead. https://github.com/zeybek/obench/blob/main/docs/explanation/statistics.md
+explains the rule.
 
 Since format version 6, a report also records where and how it was made, so history tools can
 place it: `created_at` (UTC), the `git` commit, branch and whether the tree was dirty, the
@@ -312,26 +274,15 @@ that holds none of a suite's benchmarks fails this gate too.
 Repeating runs
 
 All the samples of a run come from one process, and two processes running the same code
-differ by more than the samples inside one: the memory layout, the environment, and the
-machine change between them. So two runs of unchanged code often look different.
-`--count 5` runs every package in 5 processes, each started with a random amount of padding
-in its environment and a random offset of its stack, and combines their reports
-(`combine_runs`): the samples are pooled, and the median of every process is kept in
-`process_medians_ns`. When both sides of a comparison come from at least two processes, the
-regression test compares the process medians instead of the samples, so a gate only fails
-on a change that holds across processes. It takes 5 times as long. `--count` writes
-`--json`, `--save-baseline`, and `--html`, but not `--md`, `--csv`, or `--spall`. The first
-process prints its table, the others their summary line, and then a table of every
-benchmark's median with the range of its process medians.
-
-A baseline saved on another day, or by another CI job, has drifted with its machine.
-`obench ab ../main .` builds both trees and runs them on this machine alternately, 6 rounds
-by default (`--rounds`), each round in a random order of the two sides, so drift falls on
-both alike; then it compares them like `compare`, process medians against process medians.
-Use at least 6 rounds: with 4 or fewer, the 95% interval stretches over every difference
-between the two sides' processes, so it is too wide to flag much. `obench compare a1.json
-a2.json -- b1.json b2.json` combines several reports on each side the same way (options go
-before `--`).
+differ by more than the samples inside one. `--count 5` runs every package in 5 processes,
+each with a different memory layout, and combines their reports (`combine_runs`), keeping
+the median of every process in `process_medians_ns`. When both sides of a comparison come
+from at least two processes, the regression test compares the process medians. `obench ab
+../main .` builds both trees and runs them alternately on one machine, 6 rounds by default
+(`--rounds`), and `obench compare a1.json a2.json -- b1.json b2.json` combines several
+reports per side. `--count` writes `--json`, `--save-baseline`, and `--html`, but not
+`--md`, `--csv`, or `--spall`. See
+https://github.com/zeybek/obench/blob/main/docs/how-to/ci-gate.md for a gate that holds.
 
 Selecting benchmarks
 
@@ -417,12 +368,13 @@ Compile-time defaults can be changed with `-define`:
 
 Limits
 
-- Significance is computed from samples taken in one process. Two copies of the same code
-  can still differ by a few percent there, because each copy sits at a different address.
-  In testing, three identical benchmarks once came out 5% apart. Re-run before trusting a
-  small difference.
+- Without `--count`, significance is computed from samples taken in one process, and two
+  copies of the same code can differ by a few percent there, because each copy sits at a
+  different address. In testing, three identical benchmarks once came out 5% apart. Use
+  `--count` or `obench ab` before trusting a small difference.
 - Shared CI runners are noisy, and a change only counts when it stands out from that noise.
-  For a regression gate, raise the sample count with `-n` or use a dedicated machine.
+  `--count`, `obench ab`, and the exact gates on allocations and instructions help; a
+  dedicated machine helps most.
 - The CLI calls your benchmarks from a separate package, so they can't be `@(private)`, and a
   package named `main` without a `main` procedure can't be imported. The CLI reports both
   cases with the file and line.
