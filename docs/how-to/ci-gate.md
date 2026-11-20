@@ -44,11 +44,11 @@ In GitHub Actions, the checkout needs the history of `main` for the worktree. A 
 | Status | Meaning |
 |--:|:--|
 | 0 | passed |
-| 1 | a benchmark failed or regressed, a file couldn't be written, or the build failed |
+| 1 | a benchmark failed or regressed, the baseline file couldn't be read, another file couldn't be written, or the build failed |
 | 2 | a usage error, like an unknown option |
 | 3 | the baseline can't be compared with this run, so save it again |
 
-Status 3 means the baseline can't be read, holds none of the run's benchmarks, was built with another optimization mode, OS, architecture, `-microarch`, or bounds-check setting, or counted allocations the other way. A run that ends with 3 still writes `--save-baseline`, so a job can replace the old baseline instead of failing:
+Status 3 means the baseline holds none of the run's benchmarks, was built with another optimization mode, OS, architecture, `-microarch`, or bounds-check setting, or counted allocations the other way. A run that ends with 3 still writes `--save-baseline`, so a job can replace the old baseline instead of failing:
 
 ```sh
 set +e
@@ -61,6 +61,8 @@ elif [ "$status" -ne 0 ]; then
   exit "$status"
 fi
 ```
+
+A baseline file that can't be read, from a misspelled path or a cache that didn't restore it, gives 1, not 3, so this script fails instead of saving the branch's run as the baseline. A job whose first run has no baseline yet checks that the file exists first.
 
 ## Show the result on the pull request
 

@@ -624,7 +624,7 @@ suite_run :: proc(s: ^Suite) -> bool {
 /*
 Number of problems found by the last `suite_run` or `run_test`: misused benchmarks, failed
 `@zero_alloc` checks, time and allocation regressions that fail the run, files that couldn't
-be written, and baselines that can't be compared with the run.
+be read or written, and baselines that can't be compared with the run.
 */
 @(require_results)
 suite_failure_count :: proc "contextless" (s: ^Suite) -> int {
@@ -640,7 +640,7 @@ suite_failure_count :: proc "contextless" (s: ^Suite) -> int {
 
 // Exit status of a run or comparison that passed.
 EXIT_SUCCESS :: 0
-// Exit status when a benchmark failed or regressed, or a file couldn't be written.
+// Exit status when a benchmark failed or regressed, or a file couldn't be read or written.
 EXIT_FAILURE :: 1
 // Exit status of the CLI for a usage error: an unknown flag or a missing argument.
 EXIT_USAGE :: 2
@@ -651,10 +651,12 @@ EXIT_BASELINE :: 3
 Exit status for a program that ran `s`, as the CLI's generated runner uses it:
 
 - `EXIT_SUCCESS` (0) when `suite_run` passed
-- `EXIT_FAILURE` (1) when a benchmark failed or regressed, or a file couldn't be written
-- `EXIT_BASELINE` (3) when the baseline can't be compared with this run: it can't be read,
-  was built with another optimization mode, OS, or architecture, counted allocations the
-  other way, or holds none of the suite's benchmarks
+- `EXIT_FAILURE` (1) when a benchmark failed or regressed, or a file couldn't be read or
+  written. That includes the baseline file, so a typo in its path isn't taken for a baseline
+  to save again.
+- `EXIT_BASELINE` (3) when the baseline was read but can't be compared with this run: it was
+  built with another optimization mode, OS, or architecture, counted allocations the other
+  way, or holds none of the suite's benchmarks
 
 Time regressions against a baseline that can't be compared don't count, since its times mean
 nothing for this run, but a failed benchmark or a growth in allocations still gives 1. A CI
@@ -713,7 +715,8 @@ _suite_execute :: proc(s: ^Suite) -> bool {
 				s.config.baseline_load_path,
 				err,
 			)
-			s.failed_baseline += 1
+			// Not a baseline to save again: the path may be misspelled.
+			s.failed_io += 1
 		} else {
 			_fill_baseline_map(
 				doc,

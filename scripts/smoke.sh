@@ -121,6 +121,19 @@ set -e
 [ "$code" -eq 3 ] || fail "expected exit 3 against a baseline from another -o mode, got $code"
 grep -q "can't be compared" "$WORK/none_err.txt" || fail "expected a warning about the baseline's build"
 
+step "a baseline file that can't be read exits 1, not 3"
+set +e
+"$OBENCH" examples/sorting -f 'sort\[32\]' -n 5 -w 2 --no-color --baseline "$WORK_N/mian.json" \
+  --fail-on-regression >/dev/null 2> "$WORK/missing_err.txt"; code=$?
+set -e
+[ "$code" -eq 1 ] || fail "expected exit 1 for a baseline file that doesn't exist, got $code"
+grep -q "could not read baseline" "$WORK/missing_err.txt" || fail "expected a warning about the baseline file"
+set +e
+"$OBENCH" examples/sorting -f 'sort\[32\]' -n 5 -w 2 --no-color --count 2 \
+  --baseline "$WORK_N/mian.json" >/dev/null 2>&1; code=$?
+set -e
+[ "$code" -eq 1 ] || fail "expected --count to exit 1 for a baseline file that doesn't exist, got $code"
+
 step "a baseline that counted allocations in every timed sample exits 3"
 grep -q '"untimed_allocs": true' "$WORK/base.json" || fail "expected the default run to count allocations untimed"
 "$OBENCH" examples/allocators -n 8 -w 2 --no-color --timed-allocs \

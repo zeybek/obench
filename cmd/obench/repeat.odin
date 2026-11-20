@@ -65,10 +65,10 @@ run_package_repeated :: proc(
 	baseline: Maybe(obench.Export_Document)
 	if opts.load_baseline != "" {
 		base, err := obench.read_json_report(opts.load_baseline, context.temp_allocator)
-		gate := opts.fail_on_regression || opts.fail_on_alloc_regression
 		if err != nil {
+			// A failure, as in a single process, since the path may be misspelled.
 			fmt.eprintfln("obench: could not read baseline '%s' (%v)", opts.load_baseline, err)
-			code = worse_exit_code(code, EXIT_BASELINE if gate else 0)
+			code = worse_exit_code(code, EXIT_FAILURE)
 		} else {
 			if outputs.match_baseline_suite {
 				// Only this package's suite, as a single process compares it.

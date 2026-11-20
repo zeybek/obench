@@ -802,14 +802,30 @@ test_run_test_reports_through_the_test_runner :: proc(t: ^testing.T) {
 
 @(test)
 test_missing_baseline_fails_the_run :: proc(t: ^testing.T) {
-	cfg := quick_config()
-	cfg.baseline_load_path = ".obench_test_does_not_exist.json"
-	s := obench.suite_create("missing_baseline", cfg)
-	defer obench.suite_destroy(&s)
-	obench.bench(&s, "noop", _noop_step)
-	testing.expect(t, !obench.suite_run(&s), "an unreadable baseline must not pass silently")
-	testing.expect_value(t, s.failed_baseline, 1)
-	testing.expect_value(t, obench.suite_exit_code(&s), obench.EXIT_BASELINE)
+	broken := ".obench_test_broken_baseline.json"
+	defer _ = os.remove(broken)
+	testing.expect_value(t, os.write_entire_file(broken, "{\"benchmarks\": ["), nil)
+
+	// A misspelled path, or a file that isn't JSON, gives 1 and not 3, so a job that saves the
+	// baseline again on 3 doesn't take it for an old baseline.
+	for path in ([]string{".obench_test_does_not_exist.json", broken}) {
+		for gate in ([]bool{false, true}) {
+			cfg := quick_config()
+			cfg.baseline_load_path = path
+			cfg.fail_on_regression = gate
+			s := obench.suite_create("missing_baseline", cfg)
+			defer obench.suite_destroy(&s)
+			obench.bench(&s, "noop", _noop_step)
+			testing.expect(
+				t,
+				!obench.suite_run(&s),
+				"an unreadable baseline must not pass silently",
+			)
+			testing.expect_value(t, s.failed_io, 1)
+			testing.expect_value(t, s.failed_baseline, 0)
+			testing.expect_value(t, obench.suite_exit_code(&s), obench.EXIT_FAILURE)
+		}
+	}
 }
 
 // An optimization mode that isn't the one these tests were built with.

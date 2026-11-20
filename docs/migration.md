@@ -14,9 +14,9 @@ To catch changes that small, make the interval narrower rather than the threshol
 
 ### A baseline that can't be compared exits with status 3
 
-A baseline that can't be read, holds none of a suite's benchmarks, was built with another optimization mode, OS, architecture, `-microarch`, or bounds-check setting, or counted allocations the other way used to fail a gate with exit status 1, like a regression. It now exits with 3 (#74), so a job can save the baseline again instead of failing. A script that treats every status other than 0 as a failure keeps working. One that checks for exactly 1 has to handle 3 too.
+A baseline that holds none of a suite's benchmarks, was built with another optimization mode, OS, architecture, `-microarch`, or bounds-check setting, or counted allocations the other way used to fail a gate with exit status 1, like a regression. It now exits with 3 (#74), so a job can save the baseline again instead of failing. A baseline file that can't be read still exits with 1, so a misspelled path doesn't pass for a baseline to save again. A script that treats every status other than 0 as a failure keeps working. One that checks for exactly 1 has to handle 3 too.
 
-In the API, these problems moved from `Suite.failed_io`, which now only counts files that couldn't be written, to the new `Suite.failed_baseline`. A program with its own `main` should exit with `obench.suite_exit_code(&s)` rather than 1, to give the same statuses as the CLI. `obench compare` now also fails a gate, with 3, when the two reports have no benchmark in common, which it used to pass.
+In the API, these problems moved from `Suite.failed_io` to the new `Suite.failed_baseline`. A baseline file that can't be read still counts in `Suite.failed_io`. A program with its own `main` should exit with `obench.suite_exit_code(&s)` rather than 1, to give the same statuses as the CLI. `obench compare` now also fails a gate, with 3, when the two reports have no benchmark in common, which it used to pass.
 
 ### New and not breaking
 

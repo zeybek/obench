@@ -18,6 +18,7 @@ import "core:strings"
 TARGET_COLLECTION :: "obench_cli_target"
 LIB_COLLECTION :: "obench_cli_lib"
 
+EXIT_SUCCESS :: obench.EXIT_SUCCESS
 EXIT_FAILURE :: obench.EXIT_FAILURE
 EXIT_USAGE :: obench.EXIT_USAGE
 EXIT_BASELINE :: obench.EXIT_BASELINE
@@ -207,9 +208,10 @@ BUILD OPTIONS (forwarded to the Odin compiler):
       --custom-attribute <name>  -custom-attribute:<name> (repeatable)
 
 The compiler is taken from $ODIN when set, otherwise 'odin' on PATH.
-Exit status: 0 success, 1 benchmark/regression/build failure or an unparsable *_bench.odin
-package, 2 usage error (also a short flag together with its long form, like -n and --samples),
-3 a baseline that can't be read or compared with the run (save it again).
+Exit status: 0 success, 1 benchmark/regression/build failure, a baseline file that can't be
+read, or an unparsable *_bench.odin package, 2 usage error (also a short flag together with its
+long form, like -n and --samples), 3 a baseline that can't be compared with the run (save it
+again).
 `,
 		obench.VERSION,
 	)
