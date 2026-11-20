@@ -27,6 +27,12 @@ the `@zero_alloc` result, the clock overhead (`clamped_samples`, `windows_per_sa
 REPORT_FORMAT_VERSION :: 6
 
 /*
+JSON Schema of the current format version, which every report names in `$schema`. The docs
+site publishes it from `schema/` in the repository, one file per format version.
+*/
+REPORT_SCHEMA_URL :: "https://zeybek.github.io/obench/schema/obench-report-v6.json"
+
+/*
 Serializable record for a single benchmark in a JSON baseline or export file.
 */
 Export_Entry :: struct {
@@ -150,6 +156,7 @@ CLI for several packages contains the benchmarks of every suite; each entry carr
 own `suite_name`.
 */
 Export_Document :: struct {
+	schema:         string `json:"$schema"`,
 	format_version: int `json:"format_version"`,
 	obench_version: string `json:"obench_version"`,
 	odin_version:   string `json:"odin_version"`,
@@ -239,6 +246,7 @@ export_document :: proc(
 	}
 
 	return Export_Document {
+		schema = REPORT_SCHEMA_URL,
 		format_version = REPORT_FORMAT_VERSION,
 		obench_version = VERSION,
 		odin_version = ODIN_VERSION,
@@ -691,6 +699,7 @@ merge_json_reports :: proc(input_paths: []string, output_path: string) -> Report
 	}
 
 	merged := Export_Document {
+		schema         = REPORT_SCHEMA_URL,
 		format_version = REPORT_FORMAT_VERSION,
 		obench_version = first.obench_version if first.obench_version != "" else VERSION,
 		odin_version   = first.odin_version,

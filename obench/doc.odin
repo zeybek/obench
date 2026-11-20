@@ -228,6 +228,14 @@ settings in `config`, and the clock calibration in `clock`. Every benchmark adds
 time was clock overhead. The CLI takes the commit from `git` in the directory it runs, and a
 program with its own `main` from `OBENCH_GIT_COMMIT` or GitHub Actions' `GITHUB_SHA`. A custom
 metric can say which way it improves with the `better` argument of `report_metric`.
+
+Every report names its JSON Schema in `$schema` (`REPORT_SCHEMA_URL`). The `schema/` folder of
+the repository holds one schema per format version, the docs site publishes them under
+`/obench/schema/`, and CI checks the reports of all examples against the current one. A field
+is added within a format version only when old readers can ignore it, readers should ignore
+fields they don't know, and removing or changing a field bumps `format_version` (see
+STABILITY.md).
+
 `--fail-on-regression` turns regressions into exit status 1, which makes it usable as a CI
 gate. A baseline file that can't be read also fails the run, so a typo in the path doesn't
 pass silently. A baseline that holds none of a suite's benchmarks (a renamed suite, or the
