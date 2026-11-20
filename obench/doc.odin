@@ -154,7 +154,8 @@ and writes any configured report files without printing to stdout. examples/look
 	}
 
 Inside `odin test`, `run_test` runs a suite from a `@(test)` procedure, logs the report, and
-fails the test on any of the problems `suite_run` reports. The benchmarks in Odin's own
+fails the test on any of the problems `suite_run` reports, with one failure per problem that
+names the benchmark and the reason (`suite_failure_messages`). The benchmarks in Odin's own
 repository time a fixed number of calls with `time.Stopwatch`. examples/core_style measures
 `core:strings.prefix_length`, the same thing as Odin's `tests/benchmark/strings`. On an
 Apple M2, for 1024 bytes of ASCII, Odin's benchmark timed 2500 calls at 44.5 µs, or 17.8 ns
