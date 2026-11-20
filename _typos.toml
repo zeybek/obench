@@ -1,5 +1,11 @@
 # Spelling check settings for typos (https://github.com/crate-ci/typos).
 
+[default]
+# The short commit hashes that release-please links in CHANGELOG.md, like
+# [d2ba1a8](https://github.com/zeybek/obench/commit/d2ba1a8...). typos reads parts of them as
+# misspelled words. The text around them is still checked.
+extend-ignore-re = ["\\[[0-9a-f]{7}\\]\\(https://github\\.com/[^)]+/commit/[0-9a-f]{40}\\)"]
+
 [default.extend-identifiers]
 # scipy's Student's and Welch's t-test.
 ttest_ind = "ttest_ind"
