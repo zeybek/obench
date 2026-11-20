@@ -18,8 +18,9 @@ import "core:strings"
 TARGET_COLLECTION :: "obench_cli_target"
 LIB_COLLECTION :: "obench_cli_lib"
 
-EXIT_FAILURE :: 1
-EXIT_USAGE :: 2
+EXIT_FAILURE :: obench.EXIT_FAILURE
+EXIT_USAGE :: obench.EXIT_USAGE
+EXIT_BASELINE :: obench.EXIT_BASELINE
 
 Subcommand :: enum {
 	Run,
@@ -132,12 +133,13 @@ RUN OPTIONS:
       --save-baseline <file>     Save results as a JSON report (alias of --json)
       --threshold <pct>          Minimum median change counted as significant (default: 2.0)
       --fail-on-regression       Exit with status 1 if a benchmark regressed significantly,
-                                 the baseline holds none of a suite's benchmarks, it was
-                                 built with another -o mode, OS, arch, -microarch, or
-                                 bounds-check setting, or it counted allocations the other
-                                 way (see --timed-allocs)
+                                 and with 3 if the baseline holds none of a suite's
+                                 benchmarks, was built with another -o mode, OS, arch,
+                                 -microarch, or bounds-check setting, or counted allocations
+                                 the other way (see --timed-allocs)
       --fail-on-alloc-regression Exit with status 1 if a benchmark allocates more per operation
-                                 (heap or temp, count or bytes) than in the baseline
+                                 (heap or temp, count or bytes) than in the baseline, and with
+                                 3 if the baseline holds none of a suite's benchmarks
       --json <file>              Write a JSON report (with compare: the comparison as JSON)
       --md <file>                Write a GitHub Markdown report (with compare: the comparison,
                                  for a job summary or a PR comment)
@@ -160,7 +162,8 @@ BUILD OPTIONS (forwarded to the Odin compiler):
 
 The compiler is taken from $ODIN when set, otherwise 'odin' on PATH.
 Exit status: 0 success, 1 benchmark/regression/build failure or an unparsable *_bench.odin
-package, 2 usage error (also a short flag together with its long form, like -n and --samples).
+package, 2 usage error (also a short flag together with its long form, like -n and --samples),
+3 a baseline that can't be read or compared with the run (save it again).
 `,
 		obench.VERSION,
 	)
@@ -1409,7 +1412,10 @@ generate_runner_source :: proc(
 		strings.write_string(&sb, "\n")
 	}
 
-	strings.write_string(&sb, "\tif !obench.suite_run(&s) {\n\t\tos.exit(1)\n\t}\n}\n")
+	strings.write_string(
+		&sb,
+		"\tif !obench.suite_run(&s) {\n\t\tos.exit(obench.suite_exit_code(&s))\n\t}\n}\n",
+	)
 	return strings.to_string(sb)
 }
 
@@ -1497,20 +1503,42 @@ _odin_executable :: proc() -> string {
 	return "odin"
 }
 
-// Runs `cmd` with the CLI's standard streams and reports whether it exited with status 0.
+// Runs `cmd` with the CLI's standard streams and returns its exit status, or `EXIT_FAILURE`
+// when it couldn't be started or didn't exit normally.
 @(private = "file")
-_run_process :: proc(cmd: []string) -> bool {
+_run_process :: proc(cmd: []string) -> int {
 	child, start_err := os.process_start(
 		os.Process_Desc{command = cmd, stdout = os.stdout, stderr = os.stderr, stdin = os.stdin},
 	)
 	if start_err != nil {
 		fmt.eprintfln("obench: could not start '%s': %v", cmd[0], start_err)
-		return false
+		return EXIT_FAILURE
 	}
 	state, wait_err := os.process_wait(child)
 	// `state.success` only says whether the process crashed, and it is always true on
 	// Windows, so a failed run is detected by its exit code.
-	return wait_err == nil && state.exited && state.exit_code == 0
+	if wait_err != nil || !state.exited {
+		return EXIT_FAILURE
+	}
+	return state.exit_code
+}
+
+/*
+The worse of two exit statuses: a failure (1) beats a baseline that can't be compared (3),
+which beats success (0). Any other status, like a crash, counts as a failure.
+*/
+worse_exit_code :: proc(first, second: int) -> int {
+	normal :: proc(code: int) -> int {
+		return code if code == 0 || code == EXIT_BASELINE else EXIT_FAILURE
+	}
+	a, b := normal(first), normal(second)
+	switch {
+	case a == EXIT_FAILURE || b == EXIT_FAILURE:
+		return EXIT_FAILURE
+	case a == EXIT_BASELINE || b == EXIT_BASELINE:
+		return EXIT_BASELINE
+	}
+	return 0
 }
 
 @(private = "file")
@@ -1657,7 +1685,9 @@ append_compiler_flags :: proc(
 }
 
 /*
-Builds and runs one package. Returns false if the build or the benchmarks failed.
+Builds and runs one package and returns its exit status: 0 when it passed, `EXIT_BASELINE`
+when only its baseline can't be compared (see `obench.suite_exit_code`), and `EXIT_FAILURE`
+for a failed build or run.
 `suite_name` names the generated runner's suite; a package with its own main names its own.
 
 The package is built with `odin build` and the executable is started separately, because
@@ -1673,7 +1703,7 @@ run_package :: proc(
 	opts: CLI_Options,
 	outputs: Package_Outputs,
 	reported_ols: ^map[string]bool = nil,
-) -> bool {
+) -> int {
 	exe_name := fmt.tprintf("bench_%d", index)
 	when ODIN_OS == .Windows {
 		exe_name = fmt.tprintf("bench_%d.exe", index)
@@ -1699,12 +1729,12 @@ run_package :: proc(
 		)
 		if err := os.make_directory(runner_dir); err != nil {
 			fmt.eprintfln("obench: could not create '%s': %v", runner_dir, err)
-			return false
+			return EXIT_FAILURE
 		}
 		runner_file, _ := filepath.join({runner_dir, "main.odin"}, context.temp_allocator)
 		if err := os.write_entire_file(runner_file, source); err != nil {
 			fmt.eprintfln("obench: could not write '%s': %v", runner_file, err)
-			return false
+			return EXIT_FAILURE
 		}
 
 		append(&cmd, runner_dir, fmt.tprintf("-collection:%s=%s", TARGET_COLLECTION, pkg.dir_path))
@@ -1739,8 +1769,8 @@ run_package :: proc(
 		)
 	}
 
-	if !_run_process(cmd[:]) {
-		return false
+	if _run_process(cmd[:]) != 0 {
+		return EXIT_FAILURE
 	}
 	if !os.exists(exe_path) {
 		fmt.eprintfln(
@@ -1748,13 +1778,13 @@ run_package :: proc(
 			cmd[0],
 			exe_path,
 		)
-		return false
+		return EXIT_FAILURE
 	}
 
 	run_cmd := make([dynamic]string, context.temp_allocator)
 	append(&run_cmd, exe_path)
 	append(&run_cmd, .._runtime_args(opts, outputs))
-	return _run_process(run_cmd[:])
+	return worse_exit_code(0, _run_process(run_cmd[:]))
 }
 
 // Path of one package's partial report inside the work directory.
@@ -1861,15 +1891,15 @@ _write_merged :: proc(
 }
 
 /*
-Runs every discovered package and writes the requested reports. With several packages,
-JSON, CSV, and Markdown reports are merged into the requested file and Spall traces get a
-per-package suffix.
+Runs every discovered package, writes the requested reports, and returns the worst exit
+status of them all (see `worse_exit_code`). With several packages, JSON, CSV, and Markdown
+reports are merged into the requested file and Spall traces get a per-package suffix.
 */
-run_all :: proc(packages: []Discovered_Package, opts: CLI_Options) -> bool {
+run_all :: proc(packages: []Discovered_Package, opts: CLI_Options) -> int {
 	work_dir, tmp_err := os.make_directory_temp("", "obench-*", context.temp_allocator)
 	if tmp_err != nil {
 		fmt.eprintfln("obench: could not create a temporary directory: %v", tmp_err)
-		return false
+		return EXIT_FAILURE
 	}
 	defer os.remove_all(work_dir)
 
@@ -1886,7 +1916,7 @@ run_all :: proc(packages: []Discovered_Package, opts: CLI_Options) -> bool {
 	reported_ols := make(map[string]bool, context.temp_allocator)
 	names := suite_names(packages, opts.target_path)
 
-	all_ok := true
+	code := 0
 	for &pkg, idx in packages {
 		for w in pkg.warnings {
 			fmt.eprintfln("obench: warning: %s", w)
@@ -1931,13 +1961,14 @@ run_all :: proc(packages: []Discovered_Package, opts: CLI_Options) -> bool {
 			for p in problems {
 				fmt.eprintfln("obench: %s", p)
 			}
-			all_ok = false
+			code = worse_exit_code(code, EXIT_FAILURE)
 			continue
 		}
 
-		if !run_package(pkg, idx, names[idx], work_dir, opts, outputs, &reported_ols) {
-			all_ok = false
-		}
+		code = worse_exit_code(
+			code,
+			run_package(pkg, idx, names[idx], work_dir, opts, outputs, &reported_ols),
+		)
 		if multi {
 			if outputs.json != "" && os.exists(outputs.json) {
 				append(&json_parts, outputs.json)
@@ -1967,11 +1998,13 @@ run_all :: proc(packages: []Discovered_Package, opts: CLI_Options) -> bool {
 				)
 			}
 		}
-		all_ok &= json_ok
-		all_ok &= _write_merged(opts.md_path, md_parts[:], "Markdown", _merge_markdown)
-		all_ok &= _write_merged(opts.csv_path, csv_parts[:], "CSV", _merge_csv)
+		md_ok := _write_merged(opts.md_path, md_parts[:], "Markdown", _merge_markdown)
+		csv_ok := _write_merged(opts.csv_path, csv_parts[:], "CSV", _merge_csv)
+		if !json_ok || !md_ok || !csv_ok {
+			code = worse_exit_code(code, EXIT_FAILURE)
+		}
 	}
-	return all_ok
+	return code
 }
 
 list_packages :: proc(packages: []Discovered_Package) {
@@ -2064,7 +2097,7 @@ main :: proc() {
 			os.exit(EXIT_FAILURE)
 		}
 		if !passed {
-			os.exit(EXIT_FAILURE)
+			os.exit(compare_exit_code(opts))
 		}
 		return
 
@@ -2109,13 +2142,17 @@ main :: proc() {
 		os.exit(EXIT_FAILURE)
 	}
 
+	code := 0
 	if opts.subcommand == .List {
 		list_packages(packages[:])
-	} else if !run_all(packages[:], opts) {
-		os.exit(EXIT_FAILURE)
+	} else {
+		code = run_all(packages[:], opts)
 	}
 	// The other packages ran, but a benchmark package that doesn't parse must not pass a gate.
 	if unparsed > 0 {
-		os.exit(EXIT_FAILURE)
+		code = worse_exit_code(code, EXIT_FAILURE)
+	}
+	if code != 0 {
+		os.exit(code)
 	}
 }

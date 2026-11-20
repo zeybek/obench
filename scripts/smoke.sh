@@ -108,17 +108,17 @@ NO_COLOR=1 FORCE_COLOR=1 "$OBENCH" compare "$WORK_N/fast.json" "$WORK_N/slow.jso
   > "$WORK/cmp_no_color.txt" || true
 ! grep -q "$ESC" "$WORK/cmp_no_color.txt" || fail "NO_COLOR did not turn off the colors of compare"
 
-step "a baseline from an -o:none build fails the gate instead of looking faster"
+step "a baseline from an -o:none build exits 3 instead of looking faster"
 "$OBENCH" "$WORK_N/regress" --collection "libs=$ROOT_N" -o none -n 10 -w 5 --no-color \
   --save-baseline "$WORK_N/none.json" >/dev/null
 set +e
 "$OBENCH" "$WORK_N/regress" --collection "libs=$ROOT_N" -n 10 -w 5 --no-color \
   --baseline "$WORK_N/none.json" --fail-on-regression >/dev/null 2> "$WORK/none_err.txt"; code=$?
 set -e
-[ "$code" -eq 1 ] || fail "expected exit 1 against a baseline from another -o mode, got $code"
+[ "$code" -eq 3 ] || fail "expected exit 3 against a baseline from another -o mode, got $code"
 grep -q "can't be compared" "$WORK/none_err.txt" || fail "expected a warning about the baseline's build"
 
-step "a baseline that counted allocations in every timed sample fails the gate"
+step "a baseline that counted allocations in every timed sample exits 3"
 grep -q '"untimed_allocs": true' "$WORK/base.json" || fail "expected the default run to count allocations untimed"
 "$OBENCH" examples/allocators -n 8 -w 2 --no-color --timed-allocs \
   --save-baseline "$WORK_N/timed.json" >/dev/null
@@ -127,14 +127,14 @@ set +e
 "$OBENCH" examples/allocators -n 8 -w 2 --no-color \
   --baseline "$WORK_N/timed.json" --fail-on-regression >/dev/null 2> "$WORK/timed_err.txt"; code=$?
 set -e
-[ "$code" -eq 1 ] || fail "expected exit 1 against a baseline counted in every timed sample, got $code"
+[ "$code" -eq 3 ] || fail "expected exit 3 against a baseline counted in every timed sample, got $code"
 grep -q "counted allocations in every timed sample" "$WORK/timed_err.txt" ||
   fail "expected a warning about how the baseline counted allocations"
 set +e
 "$OBENCH" compare "$WORK_N/timed.json" "$WORK_N/base.json" --fail-on-regression --no-color \
   > "$WORK/timed_cmp.txt"; code=$?
 set -e
-[ "$code" -eq 1 ] || fail "expected compare to exit 1 across the two ways of counting, got $code"
+[ "$code" -eq 3 ] || fail "expected compare to exit 3 across the two ways of counting, got $code"
 grep -q "counted allocations in every timed sample" "$WORK/timed_cmp.txt" ||
   fail "expected compare to warn about how the baseline counted allocations"
 
@@ -164,7 +164,7 @@ set +e
 "$OBENCH" "$WORK_N/dup" --collection "libs=$ROOT_N" -n 5 -w 2 --no-color \
   --baseline "$WORK_N/dup_a.json" --fail-on-regression 2> "$WORK/dup_err.txt"; code=$?
 set -e
-[ "$code" -eq 1 ] || fail "expected exit 1 when no suite matches the baseline, got $code"
+[ "$code" -eq 3 ] || fail "expected exit 3 when no suite matches the baseline, got $code"
 grep -q "nothing was compared" "$WORK/dup_err.txt" || fail "expected a 'nothing was compared' warning"
 
 step "a build that exits 0 without an executable (unknown --microarch) fails the run"

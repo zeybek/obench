@@ -54,3 +54,28 @@ write_compare_outputs :: proc(opts: CLI_Options) -> bool {
 	}
 	return ok
 }
+
+/*
+Exit status of a comparison that didn't pass: `EXIT_BASELINE` when the two reports can't be
+compared, and `EXIT_FAILURE` otherwise (see `obench.comparison_exit_code`).
+*/
+@(private)
+compare_exit_code :: proc(opts: CLI_Options) -> int {
+	baseline, base_err := obench.read_json_report(opts.compare_old, context.temp_allocator)
+	candidate, cand_err := obench.read_json_report(opts.compare_new, context.temp_allocator)
+	if base_err != nil || cand_err != nil {
+		return EXIT_FAILURE
+	}
+	_, summary := obench.compare_documents(
+		baseline,
+		candidate,
+		opts.threshold_pct,
+		context.temp_allocator,
+	)
+	code := obench.comparison_exit_code(
+		summary,
+		opts.fail_on_regression,
+		opts.fail_on_alloc_regression,
+	)
+	return code if code != 0 else EXIT_FAILURE
+}

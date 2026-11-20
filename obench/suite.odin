@@ -65,7 +65,11 @@ Suite :: struct {
 	failed_regressions:       int,
 	failed_alloc_regressions: int, // Benchmarks whose allocations grew, with `fail_on_alloc_regression`
 	failed_errors:            int, // Benchmarks that misused the `Bencher` protocol
-	failed_io:                int, // Baseline, trace, or report files that could not be read or written
+	failed_io:                int, // Trace or report files that could not be written
+	// Baselines that can't be compared with this run: unreadable, built with another
+	// optimization mode, OS, or architecture, counting allocations the other way, or holding
+	// none of the suite's benchmarks. See `suite_exit_code`.
+	failed_baseline:          int,
 	allocator:                runtime.Allocator,
 }
 
@@ -136,6 +140,7 @@ _clear_results :: proc(s: ^Suite) {
 	s.failed_alloc_regressions = 0
 	s.failed_errors = 0
 	s.failed_io = 0
+	s.failed_baseline = 0
 }
 
 /*
