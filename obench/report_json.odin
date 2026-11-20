@@ -77,6 +77,9 @@ Export_Entry :: struct {
 	effective_samples:  f64 `json:"effective_samples"`,
 	trend_pct:          f64 `json:"trend_pct"`,
 	modes:              int `json:"modes"`,
+	// The median of each process when the report combines several (`combine_runs`); the
+	// regression test compares these when both sides have at least two.
+	process_medians_ns: []f64 `json:"process_medians_ns,omitempty"`,
 	// Hardware counters per operation (`Stats.counters`), left out without `--counters`.
 	instructions:       f64 `json:"instructions,omitempty"`,
 	cycles:             f64 `json:"cycles,omitempty"`,
@@ -191,6 +194,9 @@ Export_Document :: struct {
 	config:         Export_Run_Config `json:"config"`,
 	clock:          Export_Clock `json:"clock"`,
 	geomean_ns:     f64 `json:"geomean_ns"`,
+	// How many processes the report combines (`combine_runs`, `obench --count`); left out
+	// for one.
+	processes:      int `json:"processes,omitempty"`,
 	benchmarks:     []Export_Entry `json:"benchmarks"`,
 	complexities:   []Export_Complexity `json:"complexities,omitempty"`,
 }
@@ -495,6 +501,7 @@ _export_entry_stats :: proc(e: Export_Entry) -> Stats {
 		temp_allocs_per_op = e.temp_allocs_per_op,
 		temp_bytes_per_op  = e.temp_bytes_per_op,
 		samples_ns         = e.samples_ns,
+		process_medians_ns = e.process_medians_ns,
 		samples_batch_ns   = _valid_batch_samples(e),
 		peak_heap_bytes    = e.peak_heap_bytes,
 		clamped_samples    = e.clamped_samples,
@@ -764,6 +771,7 @@ merge_json_reports :: proc(input_paths: []string, output_path: string) -> Report
 		config         = first.config,
 		clock          = first.clock,
 		geomean_ns     = count > 0 ? math.exp(log_sum / f64(count)) : 0,
+		processes      = first.processes,
 		benchmarks     = entries[:],
 		complexities   = complexities[:],
 	}

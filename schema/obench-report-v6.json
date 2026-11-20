@@ -74,6 +74,7 @@
       }
     },
     "geomean_ns": { "type": "number", "minimum": 0 },
+    "processes": { "type": "integer", "minimum": 1, "description": "How many processes the report combines (obench --count); absent for one." },
     "benchmarks": { "type": "array", "items": { "$ref": "#/$defs/benchmark" } },
     "complexities": { "type": "array", "items": { "$ref": "#/$defs/complexity" } }
   },
@@ -112,6 +113,7 @@
         "temp_bytes_per_op": { "type": "number", "minimum": 0 },
         "custom_metrics": { "type": "array", "items": { "$ref": "#/$defs/custom_metric" } },
         "samples_ns": { "type": "array", "items": { "type": "number", "minimum": 0 } },
+        "process_medians_ns": { "type": "array", "items": { "type": "number", "minimum": 0 } },
         "samples_batch_ns": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
         "peak_heap_bytes": { "type": "integer", "minimum": 0 },
         "zero_alloc": { "type": "boolean" },

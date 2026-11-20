@@ -309,6 +309,21 @@ more per operation than in the baseline: more heap or temp allocations, or more 
 is no threshold and no test, and the table marks such a benchmark `[allocs grew]`. A baseline
 that holds none of a suite's benchmarks fails this gate too.
 
+Repeating runs
+
+All the samples of a run come from one process, and two processes running the same code
+differ by more than the samples inside one: the memory layout, the environment, and the
+machine change between them. So two runs of unchanged code often look different.
+`--count 5` runs every package in 5 processes, each started with a random amount of padding
+in its environment and a random offset of its stack, and combines their reports
+(`combine_runs`): the samples are pooled, and the median of every process is kept in
+`process_medians_ns`. When both sides of a comparison come from at least two processes, the
+regression test compares the process medians instead of the samples, so a gate only fails
+on a change that holds across processes. It takes 5 times as long. `--count` writes
+`--json`, `--save-baseline`, and `--html`, but not `--md`, `--csv`, or `--spall`. The first
+process prints its table, the others their summary line, and then a table of every
+benchmark's median with the range of its process medians.
+
 Selecting benchmarks
 
 `--filter` runs the benchmarks whose full name contains the pattern, either as plain text or
