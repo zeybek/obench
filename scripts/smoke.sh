@@ -33,13 +33,15 @@ step "list discovers the five example packages"
 [ "$(grep -c "^Package " "$WORK/list.txt")" -eq 5 ] || fail "expected 5 packages"
 
 step "run every example and merge the reports"
-"$OBENCH" examples -n 8 -w 2 --no-color --machine smoke-runner \
+"$OBENCH" examples -n 8 -w 2 --no-color --machine smoke-runner --html "$WORK_N/all.html" \
   --save-baseline "$WORK_N/base.json" --csv "$WORK_N/all.csv" --md "$WORK_N/all.md"
 for suite in allocators_bench aos_vs_soa_bench parallel_bench sorting_bench "Slice vs Binary Search vs Map"; do
   grep -q "\"suite_name\": \"$suite\"" "$WORK/base.json" || fail "merged JSON is missing suite '$suite'"
 done
 [ "$(grep -c '"full_name"' "$WORK/base.json")" -eq 37 ] || fail "expected 37 benchmarks in the merged JSON"
 [ "$(wc -l < "$WORK/all.csv" | tr -d ' ')" -eq 38 ] || fail "expected a header and 37 rows in the merged CSV"
+[ "$(grep -o '<tr class="bench">' "$WORK/all.html" | wc -l | tr -d ' ')" -eq 37 ] ||
+  fail "expected 37 benchmarks in the merged HTML report"
 
 step "export converts the merged report for other tools"
 for format in bmf gab gbench jsonl; do
@@ -81,10 +83,11 @@ ODIN
 "$OBENCH" "$WORK_N/regress" --collection "libs=$ROOT_N" -n 30 -w 20 --no-color --save-baseline "$WORK_N/fast.json"
 set +e
 "$OBENCH" "$WORK_N/regress" --collection "libs=$ROOT_N" --define WORK=10000 -n 30 -w 20 --no-color \
-  --baseline "$WORK_N/fast.json" --fail-on-regression --json "$WORK_N/slow.json"
+  --baseline "$WORK_N/fast.json" --fail-on-regression --json "$WORK_N/slow.json" --html "$WORK_N/slow.html"
 code=$?
 set -e
 [ "$code" -eq 1 ] || fail "expected exit 1 for a 10x slowdown, got $code"
+grep -q '<td class="slower">' "$WORK/slow.html" || fail "expected the HTML report to mark the slowdown"
 set +e
 "$OBENCH" compare "$WORK_N/fast.json" "$WORK_N/slow.json" --fail-on-regression --no-color; code=$?
 set -e

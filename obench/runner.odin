@@ -847,6 +847,7 @@ _suite_execute :: proc(s: ^Suite) -> bool {
 	_write_report_file(s, s.config.json_export_path, "JSON", save_json_report)
 	_write_report_file(s, s.config.md_export_path, "Markdown", save_markdown_report)
 	_write_report_file(s, s.config.csv_export_path, "CSV", save_csv_report)
+	_write_report_file(s, s.config.html_export_path, "HTML", save_html_report)
 
 	return suite_failure_count(s) == 0
 }

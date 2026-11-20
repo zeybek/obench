@@ -62,6 +62,7 @@ CLI_Options :: struct {
 	json_path:                string,
 	md_path:                  string,
 	csv_path:                 string,
+	html_path:                string,
 	spall_path:               string,
 	machine:                  string,
 	threshold_pct:            f64,
@@ -161,6 +162,8 @@ RUN OPTIONS:
       --md <file>                Write a GitHub Markdown report (with compare: the comparison,
                                  for a job summary or a PR comment)
       --csv <file>               Write an RFC 4180 CSV report
+      --html <file>              Write a self-contained HTML page with the distributions, the
+                                 time-against-N charts, and the baseline drawn over them
       --spall <file>             Write a core:prof/spall trace (one file per package)
       --machine <label>          Name the test machine in the JSON report (machine.label)
       --no-color                 Disable ANSI colors. They are also off when NO_COLOR is set
@@ -215,6 +218,7 @@ _Cli_Flags :: struct {
 	json:                     string,
 	md:                       string,
 	csv:                      string,
+	html:                     string,
 	spall:                    string,
 	machine:                  string,
 	format:                   string,
@@ -436,6 +440,7 @@ parse_cli_args :: proc(
 	opts.json_path = f.json
 	opts.md_path = f.md
 	opts.csv_path = f.csv
+	opts.html_path = f.html
 	opts.spall_path = f.spall
 	opts.machine = f.machine
 	opts.zero_alloc = f.zero_alloc
@@ -1492,6 +1497,7 @@ Package_Outputs :: struct {
 	baseline:             string, // `--save-baseline` when it differs from `json`
 	md:                   string,
 	csv:                  string,
+	html:                 string,
 	spall:                string,
 	match_baseline_suite: bool,
 }
@@ -1572,6 +1578,9 @@ _runtime_args :: proc(
 	}
 	if outputs.md != "" {
 		append(&args, "--md", outputs.md)
+	}
+	if outputs.html != "" {
+		append(&args, "--html", outputs.html)
 	}
 	if outputs.csv != "" {
 		append(&args, "--csv", outputs.csv)
@@ -2018,13 +2027,16 @@ run_all :: proc(packages: []Discovered_Package, opts: CLI_Options) -> int {
 			baseline             = extra_baseline,
 			md                   = opts.md_path,
 			csv                  = opts.csv_path,
+			html                 = opts.html_path,
 			spall                = opts.spall_path,
 			// Two packages must not compare with each other's numbers in a one-suite baseline.
 			match_baseline_suite = multi,
 		}
 		if multi {
 			outputs.baseline = "" // Merged from the JSON parts below.
-			if outputs.json != "" {
+			// The CLI draws one HTML page for all packages from their merged JSON reports.
+			outputs.html = ""
+			if outputs.json != "" || opts.html_path != "" {
 				outputs.json = _part_path(work_dir, idx, ".json")
 			}
 			if outputs.md != "" {
@@ -2085,9 +2097,13 @@ run_all :: proc(packages: []Discovered_Package, opts: CLI_Options) -> int {
 				)
 			}
 		}
+		html_ok := true
+		if json_ok && opts.html_path != "" {
+			html_ok = write_merged_html(opts, json_target, json_parts[:], work_dir)
+		}
 		md_ok := _write_merged(opts.md_path, md_parts[:], "Markdown", _merge_markdown)
 		csv_ok := _write_merged(opts.csv_path, csv_parts[:], "CSV", _merge_csv)
-		if !json_ok || !md_ok || !csv_ok {
+		if !json_ok || !html_ok || !md_ok || !csv_ok {
 			code = worse_exit_code(code, EXIT_FAILURE)
 		}
 	}

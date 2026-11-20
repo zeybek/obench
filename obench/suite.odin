@@ -107,6 +107,7 @@ _clone_config_strings :: proc(cfg: ^Config, allocator: runtime.Allocator) {
 	cfg.json_export_path = strings.clone(cfg.json_export_path, allocator)
 	cfg.md_export_path = strings.clone(cfg.md_export_path, allocator)
 	cfg.csv_export_path = strings.clone(cfg.csv_export_path, allocator)
+	cfg.html_export_path = strings.clone(cfg.html_export_path, allocator)
 	cfg.spall_export_path = strings.clone(cfg.spall_export_path, allocator)
 	cfg.machine_label = strings.clone(cfg.machine_label, allocator)
 }
@@ -121,6 +122,7 @@ _delete_config_strings :: proc(cfg: ^Config, allocator: runtime.Allocator) {
 	delete(cfg.json_export_path, allocator)
 	delete(cfg.md_export_path, allocator)
 	delete(cfg.csv_export_path, allocator)
+	delete(cfg.html_export_path, allocator)
 	delete(cfg.spall_export_path, allocator)
 	delete(cfg.machine_label, allocator)
 	cfg^ = {}

@@ -52,6 +52,7 @@ Config :: struct {
 	json_export_path:         string,
 	md_export_path:           string,
 	csv_export_path:          string,
+	html_export_path:         string, // A self-contained HTML page with charts (`--html`, `OBENCH_HTML`)
 	spall_export_path:        string,
 	// A name for the test machine, written to the JSON report's `machine.label` (`--machine`,
 	// `OBENCH_MACHINE`), so history tools can tell machines apart. Default: "".
@@ -190,6 +191,9 @@ default_config :: proc() -> Config {
 	if val := os.get_env("OBENCH_CSV", context.temp_allocator); len(val) > 0 {
 		cfg.csv_export_path = val
 	}
+	if val := os.get_env("OBENCH_HTML", context.temp_allocator); len(val) > 0 {
+		cfg.html_export_path = val
+	}
 	if val := os.get_env("OBENCH_SPALL", context.temp_allocator); len(val) > 0 {
 		cfg.spall_export_path = val
 	}
@@ -281,6 +285,7 @@ apply_args :: proc(cfg: ^Config, args: []string) {
 		     "json",
 		     "md",
 		     "csv",
+		     "html",
 		     "spall",
 		     "machine":
 		case:
@@ -337,6 +342,8 @@ apply_args :: proc(cfg: ^Config, args: []string) {
 			cfg.md_export_path = val
 		case "csv":
 			cfg.csv_export_path = val
+		case "html":
+			cfg.html_export_path = val
 		case "spall":
 			cfg.spall_export_path = val
 		}
