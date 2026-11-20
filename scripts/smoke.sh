@@ -245,6 +245,17 @@ case "$(uname -s)" in
     ;;
 esac
 
+step "--test, --exact, -q and list --json"
+"$OBENCH" examples/sorting --test --no-color > "$WORK/test_mode.txt"
+grep -q "note: --test ran every benchmark once" "$WORK/test_mode.txt" || fail "expected the --test note"
+grep -q "PASS: 6 benchmark(s)" "$WORK/test_mode.txt" || fail "expected --test to run all 6 sorting benchmarks"
+"$OBENCH" examples/sorting --exact 'in_place_sort::slice_sort[128]' -n 5 -w 2 -q --no-color \
+  --json "$WORK_N/exact.json" > "$WORK/exact.txt"
+[ "$(grep -c '"full_name"' "$WORK/exact.json")" -eq 1 ] || fail "expected --exact to run one benchmark"
+[ "$(wc -l < "$WORK/exact.txt" | tr -d ' ')" -le 2 ] || fail "expected -q to print only the summary"
+"$OBENCH" list examples/sorting --json > "$WORK/list.json"
+grep -q '"in_place_sort::slice_sort\[128\]"' "$WORK/list.json" || fail "expected full names in list --json"
+
 step "nothing was written into the source tree"
 AFTER="$(snapshot)"
 [ "$BEFORE" = "$AFTER" ] || fail "files under examples/ changed: $(diff <(echo "$BEFORE") <(echo "$AFTER") || true)"

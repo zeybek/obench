@@ -28,7 +28,19 @@ Config :: struct {
 	untimed_alloc_check:      bool, // Default: DEFAULT_UNTIMED_ALLOCS (true: count allocations in one untimed batch after sampling; false: in every timed sample)
 	fail_on_regression:       bool, // Fail suite if any benchmark regresses beyond noise_threshold_pct
 	fail_on_alloc_regression: bool, // Fail suite if a benchmark's allocations or bytes per op grew against the baseline
-	filter:                   string, // Substring filter on the full benchmark name
+	// Runs only the benchmarks whose full name contains `filter`, either as plain text or as a
+	// `core:text/regex` regular expression (`--filter`).
+	filter:                   string,
+	// Skips the benchmarks whose full name contains `skip`, matched like `filter` (`--skip`).
+	skip:                     string,
+	// Runs only the benchmark with exactly this full name, like `group::name[64]` (`--exact`).
+	exact:                    string,
+	// Runs every benchmark once with a batch of one iteration, to check that it works, its
+	// `@zero_alloc` assertion, and its allocations, without measuring it (`--test`). The
+	// baseline is neither read nor saved. Default: false.
+	test_mode:                bool,
+	// Prints only problems and the summary line instead of the table (`-q`). Default: false.
+	quiet:                    bool,
 	noise_threshold_pct:      f64, // Default: 2.0%
 	color_output:             bool, // Default: DEFAULT_COLOR
 	show_histogram:           bool, // Default: DEFAULT_HISTOGRAM
@@ -97,6 +109,33 @@ default_config :: proc() -> Config {
 	if val := os.get_env("OBENCH_FILTER", context.temp_allocator); len(val) > 0 {
 		cfg.filter = val
 	}
+	if val := os.get_env("OBENCH_SKIP", context.temp_allocator); len(val) > 0 {
+		cfg.skip = val
+	}
+	if val := os.get_env("OBENCH_EXACT", context.temp_allocator); len(val) > 0 {
+		cfg.exact = val
+	}
+	if val := os.get_env("OBENCH_TEST", context.temp_allocator); val == "1" || val == "true" {
+		cfg.test_mode = true
+	}
+	if val := os.get_env("OBENCH_QUIET", context.temp_allocator); val == "1" || val == "true" {
+		cfg.quiet = true
+	}
+	if val := os.get_env("OBENCH_BATCH_SIZE", context.temp_allocator); len(val) > 0 {
+		if n, ok := strconv.parse_int(val); ok && n > 0 {
+			cfg.fixed_batch_size = n
+		}
+	}
+	if val := os.get_env("OBENCH_MAX_TIME", context.temp_allocator); len(val) > 0 {
+		if d, ok := parse_duration(val); ok && d > 0 {
+			cfg.max_bench_time = d
+		}
+	}
+	if val := os.get_env("OBENCH_MIN_SAMPLE_TIME", context.temp_allocator); len(val) > 0 {
+		if d, ok := parse_duration(val); ok && d > 0 {
+			cfg.min_sample_time = d
+		}
+	}
 	if val := os.get_env("OBENCH_SAMPLES", context.temp_allocator); len(val) > 0 {
 		if n, ok := strconv.parse_int(val); ok && n > 0 {
 			cfg.sample_count = n
@@ -163,9 +202,10 @@ default_config :: proc() -> Config {
 }
 
 /*
-Applies obench command-line flags (`--filter`, `--samples`, `--warmup`, `--threshold`,
-`--baseline`, `--match-baseline-suite`, `--save-baseline`, `--json`, `--md`, `--csv`,
-`--spall`, `--zero-alloc`, `--untimed-allocs`, `--timed-allocs`, `--fail-on-regression`,
+Applies obench command-line flags (`--filter`, `--skip`, `--exact`, `--samples`, `--warmup`,
+`--max-time`, `--min-sample-time`, `--batch-size`, `--threshold`, `--baseline`,
+`--match-baseline-suite`, `--save-baseline`, `--json`, `--md`, `--csv`, `--spall`,
+`--zero-alloc`, `--untimed-allocs`, `--timed-allocs`, `--fail-on-regression`, `--test`, `-q`,
 `--no-color`, `--no-histogram`) to `cfg`.
 
 Values may be given as `--flag value`, `--flag=value`, or `-flag:value`. Unknown arguments
@@ -205,6 +245,12 @@ apply_args :: proc(cfg: ^Config, args: []string) {
 		case "--match-baseline-suite", "-match-baseline-suite":
 			cfg.match_baseline_suite = true
 			continue
+		case "--test", "-test":
+			cfg.test_mode = true
+			continue
+		case "-q", "--quiet", "-quiet":
+			cfg.quiet = true
+			continue
 		}
 
 		trimmed := strings.trim_left(arg, "-")
@@ -220,6 +266,11 @@ apply_args :: proc(cfg: ^Config, args: []string) {
 		switch key {
 		case "f",
 		     "filter",
+		     "skip",
+		     "exact",
+		     "max-time",
+		     "min-sample-time",
+		     "batch-size",
 		     "n",
 		     "samples",
 		     "w",
@@ -246,6 +297,22 @@ apply_args :: proc(cfg: ^Config, args: []string) {
 		switch key {
 		case "f", "filter":
 			cfg.filter = val
+		case "skip":
+			cfg.skip = val
+		case "exact":
+			cfg.exact = val
+		case "max-time":
+			if d, ok := parse_duration(val); ok && d > 0 {
+				cfg.max_bench_time = d
+			}
+		case "min-sample-time":
+			if d, ok := parse_duration(val); ok && d > 0 {
+				cfg.min_sample_time = d
+			}
+		case "batch-size":
+			if n, ok := strconv.parse_int(val); ok && n > 0 {
+				cfg.fixed_batch_size = n
+			}
 		case "machine":
 			cfg.machine_label = val
 		case "n", "samples":
@@ -274,4 +341,28 @@ apply_args :: proc(cfg: ^Config, args: []string) {
 			cfg.spall_export_path = val
 		}
 	}
+}
+
+/*
+Parses a duration such as `200ms`, `500us`, `1.5s`, or `250ns` (`µs` works as well). The unit
+is required. Returns `ok = false` for anything else, and for a negative duration.
+*/
+@(require_results)
+parse_duration :: proc(text: string) -> (d: time.Duration, ok: bool) {
+	units := [?]struct {
+		suffix: string,
+		scale:  f64,
+	}{{"ns", 1}, {"us", 1e3}, {"µs", 1e3}, {"ms", 1e6}, {"s", 1e9}}
+	for u in units {
+		if !strings.has_suffix(text, u.suffix) {
+			continue
+		}
+		number := strings.trim_space(text[:len(text) - len(u.suffix)])
+		value, parsed := strconv.parse_f64(number)
+		if !parsed || value < 0 || value * u.scale > f64(max(i64)) {
+			return 0, false
+		}
+		return time.Duration(value * u.scale), true
+	}
+	return 0, false
 }

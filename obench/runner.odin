@@ -6,6 +6,7 @@ import "core:fmt"
 import "core:math"
 import "core:slice"
 import "core:strings"
+import "core:text/regex"
 import "core:time"
 
 // A benchmark always keeps at least this many samples before the time budget can stop it.
@@ -223,7 +224,8 @@ _execute_entry :: proc(
 		spall_begin(spall_rec, "warmup")
 		defer spall_end(spall_rec)
 
-		warmup_budget := i64(cfg.warmup_time)
+		// `--test` runs the one batch that validates the procedure and nothing more.
+		warmup_budget := i64(cfg.warmup_time) if !cfg.test_mode else 0
 		warmup_elapsed: i64 = 0
 		warmup_batch := 1
 		wall_start := time.tick_now()
@@ -252,7 +254,7 @@ _execute_entry :: proc(
 	}
 
 	// 2. Auto-calibrate batch_size so each sample takes >= min_sample_time.
-	batch_size := cfg.fixed_batch_size
+	batch_size := cfg.fixed_batch_size if !cfg.test_mode else 1
 	if batch_size <= 0 {
 		spall_begin(spall_rec, "calibrate")
 		defer spall_end(spall_rec)
@@ -314,7 +316,7 @@ _execute_entry :: proc(
 	}
 
 	// 3. Sample collection with allocation tracking.
-	sample_target := max(cfg.sample_count, 5)
+	sample_target := max(cfg.sample_count, 5) if !cfg.test_mode else 1
 	// The time budget usually ends sampling long before a huge `sample_count`.
 	initial_cap := min(sample_target, 1024)
 	ns_samples := make([dynamic]f64, 0, initial_cap, s.allocator)
@@ -633,7 +635,13 @@ _suite_execute :: proc(s: ^Suite) -> bool {
 	defer destroy_baseline_map(&baseline_map, s.allocator)
 
 	baseline_loaded := false
-	if s.config.baseline_load_path != "" {
+	if s.config.test_mode && s.config.baseline_load_path != "" {
+		fmt.eprintfln(
+			"obench: --test doesn't measure, so baseline '%s' isn't compared",
+			s.config.baseline_load_path,
+		)
+	}
+	if s.config.baseline_load_path != "" && !s.config.test_mode {
 		if doc, err := read_json_report(s.config.baseline_load_path, context.temp_allocator);
 		   err != nil {
 			fmt.eprintfln(
@@ -693,6 +701,12 @@ _suite_execute :: proc(s: ^Suite) -> bool {
 		}
 	}
 
+	filter := _name_pattern_make(s.config.filter, "--filter", s.allocator)
+	defer _name_pattern_destroy(&filter, s.allocator)
+	skip := _name_pattern_make(s.config.skip, "--skip", s.allocator)
+	defer _name_pattern_destroy(&skip, s.allocator)
+	selecting := s.config.filter != "" || s.config.skip != "" || s.config.exact != ""
+
 	spall_rec: Spall_Recorder
 	if !spall_recorder_init(&spall_rec, s.config.spall_export_path, s.allocator) {
 		fmt.eprintfln("obench: could not create trace file '%s'", s.config.spall_export_path)
@@ -728,8 +742,8 @@ _suite_execute :: proc(s: ^Suite) -> bool {
 				cohort_start := len(s.results)
 
 				for entry in g.entries {
-					if s.config.filter != "" {
-						probe := format_full_name(
+					if selecting {
+						name := format_full_name(
 							g.name,
 							entry.name,
 							param_val,
@@ -738,7 +752,7 @@ _suite_execute :: proc(s: ^Suite) -> bool {
 							has_threads,
 							context.temp_allocator,
 						)
-						if !strings.contains(probe, s.config.filter) {
+						if !_selected(name, &filter, &skip, s.config.exact) {
 							continue
 						}
 					}
@@ -818,14 +832,99 @@ _suite_execute :: proc(s: ^Suite) -> bool {
 
 	// A filter that matches nothing here (a typo, or a benchmark of another suite) must not
 	// replace a saved baseline or report with an empty one.
-	if len(s.results) == 0 && s.config.filter != "" {
+	if len(s.results) == 0 && selecting {
 		return suite_failure_count(s) == 0
 	}
 
-	_write_report_file(s, s.config.baseline_save_path, "baseline", save_json_report)
+	if s.config.test_mode && s.config.baseline_save_path != "" {
+		fmt.eprintfln(
+			"obench: --test doesn't measure, so baseline '%s' isn't saved",
+			s.config.baseline_save_path,
+		)
+	} else {
+		_write_report_file(s, s.config.baseline_save_path, "baseline", save_json_report)
+	}
 	_write_report_file(s, s.config.json_export_path, "JSON", save_json_report)
 	_write_report_file(s, s.config.md_export_path, "Markdown", save_markdown_report)
 	_write_report_file(s, s.config.csv_export_path, "CSV", save_csv_report)
 
 	return suite_failure_count(s) == 0
+}
+
+// A `--filter` or `--skip` pattern. A name matches it when the name contains the text, or when
+// the text is a regular expression that matches part of the name, so the plain substrings
+// that filters were before still select the same benchmarks.
+@(private = "file")
+_Name_Pattern :: struct {
+	text:     string,
+	regex:    regex.Regular_Expression,
+	is_regex: bool,
+}
+
+@(private = "file")
+_name_pattern_make :: proc(
+	text: string,
+	flag: string,
+	allocator: runtime.Allocator,
+) -> _Name_Pattern {
+	p := _Name_Pattern {
+		text = text,
+	}
+	if text == "" {
+		return p
+	}
+	re, err := regex.create(text, {}, allocator, context.temp_allocator)
+	if err != nil {
+		fmt.eprintfln(
+			"obench: %s '%s' isn't a regular expression (%v), so it only matches as plain text",
+			flag,
+			text,
+			err,
+		)
+		return p
+	}
+	p.regex = re
+	p.is_regex = true
+	return p
+}
+
+@(private = "file")
+_name_pattern_destroy :: proc(p: ^_Name_Pattern, allocator: runtime.Allocator) {
+	if p.is_regex {
+		regex.destroy_regex(p.regex, allocator)
+	}
+	p^ = {}
+}
+
+@(private = "file")
+_name_pattern_matches :: proc(p: ^_Name_Pattern, name: string) -> bool {
+	if strings.contains(name, p.text) {
+		return true
+	}
+	if !p.is_regex {
+		return false
+	}
+	capture, matched := regex.match_and_allocate_capture(
+		p.regex,
+		name,
+		context.temp_allocator,
+		context.temp_allocator,
+	)
+	regex.destroy_capture(capture, context.temp_allocator)
+	return matched
+}
+
+// Whether `--filter`, `--skip`, and `--exact` let the benchmark called `name` run.
+@(private = "file")
+_selected :: proc(name: string, filter, skip: ^_Name_Pattern, exact: string) -> bool {
+	if exact != "" && name != exact {
+		return false
+	}
+	if filter.text != "" && !_name_pattern_matches(filter, name) {
+		return false
+	}
+	if skip.text != "" && _name_pattern_matches(skip, name) {
+		return false
+	}
+	return true
 }
