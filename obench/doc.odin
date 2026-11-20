@@ -20,7 +20,8 @@ Features:
 - Multi-threaded contention benchmarking (`run_parallel` and thread-scaling groups)
 - Big-O complexity inference for parameterized groups
 - Custom domain metrics (`report_metric`)
-- Statistics: percentiles, MAD, CI95, Tukey outliers, the Mann-Whitney U test, suite geomean
+- Statistics: percentiles, MAD, CI95, Tukey outliers, the Mann-Whitney U test, Hodges-Lehmann
+  shift intervals, suite geomean
 - `core:prof/spall` traces, JSON baselines, CSV, and Markdown reports
 
 Install
@@ -169,8 +170,8 @@ Reading the report
 
 Each sample is one calibrated batch (at least 1 ms by default), and the columns are per
 operation. `x faster` and `x slower` compare each benchmark with the first one in its group
-for the same parameter, and only appear when the Mann-Whitney U test finds the difference
-significant and it is above 3%. Smaller or noisy differences show as `~1.04x (noise)`. The
+for the same parameter, and only appear when the 95% confidence interval of the difference
+lies beyond 3%. Smaller or noisy differences show as `~1.04x (noise)`. The
 sparkline is a histogram of the samples between the fastest and p99. `[near timer
 resolution]` marks a benchmark whose timed windows are less than 100 clock ticks long (an
 expensive `iter_batched` setup can cut calibration short, and every `pause`/`resume` pair
@@ -204,13 +205,19 @@ reports without running anything:
 	obench examples --baseline main.json --fail-on-regression
 	obench compare main.json branch.json --fail-on-regression
 
-A change counts as a regression when the Mann-Whitney U test on the two runs' samples finds
-a difference at the 5% level and the median moved by more than `--threshold` percent (2% by
-default). The test works on ranks, so a few very slow samples in either run can't hide a
-shift of the rest. Reports keep every sample for this (`samples_ns`, since format version 3),
-along with each sample's overhead-adjusted integer batch duration (`samples_batch_ns`, since
-format version 5) for downstream exact integer analysis. Against an older report without
-samples, Welch's t-test on the means is used instead.
+A change counts as a regression only when its whole 95% confidence interval lies above
+`--threshold` percent (2% by default). The change is the Hodges-Lehmann estimate, the median
+of the ratios between every sample of one run and every sample of the other, with the
+distribution-free interval of the Mann-Whitney U test. The interval is exact up to 20
+samples a side, and above that it widens when consecutive samples move together (see
+`hodges_lehmann_shift`). It works on ranks, so a few very slow samples in either run can't
+hide a shift of the rest. `compare` prints the interval and the Mann-Whitney p-value, and
+under the summary the number of flags to expect from the noise between samples. That number
+doesn't cover a machine that ran at another speed between the two runs, which shifts every
+sample of one of them. Reports keep every sample for this (`samples_ns`, since format
+version 3), along with each sample's overhead-adjusted integer batch duration
+(`samples_batch_ns`, since format version 5) for downstream exact integer analysis. Against
+an older report without samples, Welch's t-test on the means is used instead.
 
 Since format version 6, a report also records where and how it was made, so history tools can
 place it: `created_at` (UTC), the `git` commit, branch and whether the tree was dirty, the

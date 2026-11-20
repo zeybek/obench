@@ -2,6 +2,7 @@ package obench_tests
 
 import obench "../obench"
 import "core:encoding/json"
+import "core:fmt"
 import "core:strings"
 import "core:testing"
 
@@ -99,4 +100,40 @@ test_comparison_json_has_the_summary_and_a_verdict_per_benchmark :: proc(t: ^tes
 	testing.expect_value(t, benches[0].(json.Object)["verdict"].(json.String), "unchanged")
 	testing.expect_value(t, benches[0].(json.Object)["allocs_grew"].(json.Boolean), true)
 	testing.expect_value(t, benches[1].(json.Object)["verdict"].(json.String), "error")
+}
+
+@(test)
+test_compare_prints_the_interval_and_expected_false_alarms :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	samples := []f64{100, 101, 99, 102, 98, 100.5, 99.5, 101.5, 98.5, 100}
+	entry := obench.Export_Entry {
+		suite_name = "s",
+		full_name  = "a",
+		samples    = len(samples),
+		p50_ns     = 100,
+		mean_ns    = 100,
+		std_dev_ns = 1.2,
+		samples_ns = samples,
+	}
+	entries := make([]obench.Export_Entry, 20, context.temp_allocator)
+	for &e, i in entries {
+		e = entry
+		e.full_name = fmt.tprintf("bench_%d", i)
+	}
+	doc := obench.Export_Document {
+		format_version = obench.REPORT_FORMAT_VERSION,
+		benchmarks     = entries,
+	}
+	sb := strings.builder_make(context.temp_allocator)
+	_ = obench.write_comparison(strings.to_writer(&sb), doc, doc, 2.0, false)
+	out := strings.to_string(sb)
+	testing.expect(
+		t,
+		strings.contains(out, "Expected false alarms: at most 1.0 of 20 (5% each)"),
+		out,
+	)
+	testing.expect(t, strings.contains(out, "[-"), "the interval of the shift is printed")
+
+	_, summary := obench.compare_documents(doc, doc, 2.0, context.temp_allocator)
+	testing.expect_value(t, summary.expected_false_alarms, 1.0)
 }
