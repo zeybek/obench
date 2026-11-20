@@ -1,0 +1,31 @@
+name: A/A
+
+# Runs unchanged code against itself every week: three reports of the examples, each from five
+# processes (--count 5), compared pairwise. The regression gate should flag at most 5% of those
+# comparisons; the job fails when it flags more, and the job summary has the counts.
+
+on:
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  aa:
+    name: unchanged code passes the gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: laytan/setup-odin@8536d8fa450ec6f1bd9ddc84bbaaf16296c0051d # v2.12.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          release: latest
+
+      - name: Three A/A reports, compared pairwise
+        run: make aa-check
