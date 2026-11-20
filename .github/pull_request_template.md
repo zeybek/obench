@@ -23,5 +23,6 @@ report, paste the obench output from before and after. -->
 - [ ] New behavior has a test in `tests/` or `cmd/obench/main_test.odin`
 - [ ] New or changed public declarations have doc comments, and `obench/doc.odin` covers anything users need to know
 - [ ] A change to the JSON report layout bumps `REPORT_FORMAT_VERSION`
+- [ ] A breaking change (`feat!:` or `fix!:`) has a section in `docs/migration.md`
 - [ ] A new example the CLI discovers is in `RUNNER_EXAMPLES` in the `Makefile`, in the check step of `.github/workflows/ci.yml`, and in the counts in `scripts/smoke.sh`
 - [ ] Benchmark numbers in the docs come from a real run on a named machine

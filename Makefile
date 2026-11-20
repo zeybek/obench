@@ -78,7 +78,7 @@ aa-check: $(OBENCH_BIN)
 
 # Links in the documentation (needs lychee).
 links:
-	lychee --no-progress --max-concurrency 8 --timeout 20 './*.md' './scripts/odin-doc.json'
+	lychee --no-progress --max-concurrency 8 --timeout 20 './*.md' './docs/**/*.md' './scripts/odin-doc.json'
 
 fmt:
 	@for f in $(SOURCES); do $(ODINFMT) -config:odinfmt.json -w "$$f" || exit 1; done

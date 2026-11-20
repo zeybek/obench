@@ -31,6 +31,10 @@ perl -pi -e '
   s/Browse API documentation for the Odin base, core, and vendor library collections\./Allocation-aware micro-benchmarking for Odin./g;
 ' "${pages[@]}"
 
+# The home page embeds the README, whose links to other Markdown files in the repository are
+# relative and don't exist on this site, so they point at the files on GitHub instead.
+perl -pi -e 's{href="(?![a-z]+:|/|#)([^"]+\.md(?:#[^"]*)?)"}{href="https://github.com/zeybek/obench/blob/main/$1"}g' "${pages[@]}"
+
 # The JSON Schema of every report format version, at /obench/schema/.
 mkdir -p schema
 cp ../../schema/*.json schema/
