@@ -10,7 +10,8 @@ process order, its statistics computed again over the pooled samples, and the me
 each process kept in `process_medians_ns`, which the regression test compares when both
 sides have at least two (see `compare_baseline`). A benchmark that failed in any process
 keeps that error. Allocation counts, custom metrics, and complexity fits come from the
-first process that has the benchmark. `processes` is set to `len(docs)`.
+first process that has the benchmark. A report that already combines processes counts as
+that many, with its process medians carried over, so `processes` is the total.
 
 Everything is allocated with `allocator`; the strings still point into `docs`.
 */
@@ -23,7 +24,10 @@ combine_runs :: proc(docs: []Export_Document, allocator := context.allocator) ->
 		return docs[0]
 	}
 	out := docs[0]
-	out.processes = len(docs)
+	out.processes = 0
+	for doc in docs {
+		out.processes += max(doc.processes, 1)
+	}
 
 	key :: proc(e: Export_Entry) -> [2]string {
 		return {e.suite_name, e.full_name}
@@ -77,7 +81,7 @@ _combine_entry :: proc(entries: []Export_Entry, allocator := context.allocator) 
 
 	pooled := make([dynamic]f64, allocator)
 	pooled_batch := make([dynamic]u64, allocator)
-	medians := make([]f64, len(entries), allocator)
+	medians := make([dynamic]f64, allocator)
 	cycles := make([]f64, len(entries), allocator)
 	defer delete(cycles, allocator)
 	clamped := 0
@@ -85,12 +89,17 @@ _combine_entry :: proc(entries: []Export_Entry, allocator := context.allocator) 
 	for e, i in entries {
 		append(&pooled, ..e.samples_ns)
 		append(&pooled_batch, ..e.samples_batch_ns)
-		medians[i] = e.p50_ns
+		// A report that already combines processes brings their medians along.
+		if len(e.process_medians_ns) > 0 {
+			append(&medians, ..e.process_medians_ns)
+		} else {
+			append(&medians, e.p50_ns)
+		}
 		cycles[i] = e.median_cycles
 		clamped += e.clamped_samples
 		overhead_share += e.overhead_share
 	}
-	out.process_medians_ns = medians
+	out.process_medians_ns = medians[:]
 	out.samples_ns = pooled[:]
 	out.samples_batch_ns = pooled_batch[:]
 	out.samples = len(pooled)

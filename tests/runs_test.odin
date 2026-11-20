@@ -75,3 +75,22 @@ test_compare_baseline_uses_process_medians_when_both_sides_have_them :: proc(t: 
 		"one side has no processes",
 	)
 }
+
+@(test)
+test_combine_runs_carries_the_processes_of_combined_reports :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	first := obench.combine_runs(
+		[]obench.Export_Document{_run_doc(10, {9, 10, 11}), _run_doc(12, {11, 12, 13})},
+		context.temp_allocator,
+	)
+	again := obench.combine_runs(
+		[]obench.Export_Document{first, _run_doc(11, {10, 11, 12})},
+		context.temp_allocator,
+	)
+	testing.expect_value(t, again.processes, 3)
+	medians := again.benchmarks[0].process_medians_ns
+	testing.expect_value(t, len(medians), 3)
+	testing.expect_value(t, medians[0], 10.0)
+	testing.expect_value(t, medians[1], 12.0)
+	testing.expect_value(t, medians[2], 11.0)
+}

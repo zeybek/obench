@@ -324,6 +324,15 @@ on a change that holds across processes. It takes 5 times as long. `--count` wri
 process prints its table, the others their summary line, and then a table of every
 benchmark's median with the range of its process medians.
 
+A baseline saved on another day, or by another CI job, has drifted with its machine.
+`obench ab ../main .` builds both trees and runs them on this machine alternately, 6 rounds
+by default (`--rounds`), each round in a random order of the two sides, so drift falls on
+both alike; then it compares them like `compare`, process medians against process medians.
+Use at least 6 rounds: with 4 or fewer, the 95% interval stretches over every difference
+between the two sides' processes, so it is too wide to flag much. `obench compare a1.json
+a2.json -- b1.json b2.json` combines several reports on each side the same way (options go
+before `--`).
+
 Selecting benchmarks
 
 `--filter` runs the benchmarks whose full name contains the pattern, either as plain text or

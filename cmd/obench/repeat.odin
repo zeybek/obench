@@ -30,16 +30,7 @@ run_package_repeated :: proc(
 	if !built {
 		return EXIT_FAILURE
 	}
-	// The processes only measure; the combined report is compared and saved afterwards.
-	child := opts
-	child.load_baseline = ""
-	child.fail_on_regression = false
-	child.fail_on_alloc_regression = false
-	defer {
-		os.unset_env("OBENCH_ENV_PADDING")
-		os.unset_env("OBENCH_STACK_OFFSET")
-	}
-
+	child := measuring_options(opts)
 	code := 0
 	docs := make([dynamic]obench.Export_Document, context.temp_allocator)
 	for k in 0 ..< opts.count {
@@ -51,18 +42,10 @@ run_package_repeated :: proc(
 		if k > 0 && !opts.quiet {
 			fmt.printf("obench: %s, process %d of %d: ", suite_name, k + 1, opts.count)
 		}
-		padding := strings.repeat("x", rand.int_max(4097), context.temp_allocator)
-		_ = os.set_env("OBENCH_ENV_PADDING", padding)
-		_ = os.set_env("OBENCH_STACK_OFFSET", fmt.tprintf("%d", 16 * rand.int_max(257)))
-
-		cmd := make([dynamic]string, context.temp_allocator)
-		append(&cmd, exe)
-		append(&cmd, .._runtime_args(child, Package_Outputs{json = part}))
-		code = worse_exit_code(code, _run_process(cmd[:]))
-		doc, err := obench.read_json_report(part, context.temp_allocator)
-		if err != nil {
-			fmt.eprintfln("obench: %s: process %d wrote no report (%v)", suite_name, k + 1, err)
-			code = worse_exit_code(code, EXIT_FAILURE)
+		doc, run_code, ok := measure_process(exe, child, part)
+		code = worse_exit_code(code, run_code)
+		if !ok {
+			fmt.eprintfln("obench: %s: process %d wrote no report", suite_name, k + 1)
 			continue
 		}
 		append(&docs, doc)
@@ -196,4 +179,47 @@ _print_process_medians :: proc(doc: obench.Export_Document, color: bool) {
 		)
 	}
 	fmt.println()
+}
+
+// The options of a process that only measures: the combined report is compared and saved
+// afterwards.
+measuring_options :: proc(opts: CLI_Options) -> CLI_Options {
+	child := opts
+	child.load_baseline = ""
+	child.fail_on_regression = false
+	child.fail_on_alloc_regression = false
+	return child
+}
+
+/*
+Runs `exe` once with `opts`, writing its JSON report to `part`, from a random amount of
+`OBENCH_ENV_PADDING` (up to 4 KiB) and a random `OBENCH_STACK_OFFSET` (up to 4 KiB), so
+repeated processes don't all share one memory layout. Returns the report, the exit status,
+and whether the report could be read.
+*/
+measure_process :: proc(
+	exe: string,
+	opts: CLI_Options,
+	part: string,
+) -> (
+	doc: obench.Export_Document,
+	code: int,
+	ok: bool,
+) {
+	padding := strings.repeat("x", rand.int_max(4097), context.temp_allocator)
+	_ = os.set_env("OBENCH_ENV_PADDING", padding)
+	_ = os.set_env("OBENCH_STACK_OFFSET", fmt.tprintf("%d", 16 * rand.int_max(257)))
+	defer {
+		_ = os.unset_env("OBENCH_ENV_PADDING")
+		_ = os.unset_env("OBENCH_STACK_OFFSET")
+	}
+	cmd := make([dynamic]string, context.temp_allocator)
+	append(&cmd, exe)
+	append(&cmd, .._runtime_args(opts, Package_Outputs{json = part}))
+	code = worse_exit_code(0, _run_process(cmd[:]))
+	read, err := obench.read_json_report(part, context.temp_allocator)
+	if err != nil {
+		return {}, worse_exit_code(code, EXIT_FAILURE), false
+	}
+	return read, code, true
 }
