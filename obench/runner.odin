@@ -34,6 +34,7 @@ _Batch_Result :: struct {
 	metric_values:        [MAX_CUSTOM_METRICS]f64,
 	metric_units:         [MAX_CUSTOM_METRICS][MAX_METRIC_UNIT_LEN]u8,
 	metric_unit_lens:     [MAX_CUSTOM_METRICS]int,
+	metric_better:        [MAX_CUSTOM_METRICS]Metric_Better,
 	custom_metrics_count: int,
 	error:                Bench_Error,
 }
@@ -108,6 +109,7 @@ _run_batch :: proc(
 	for i in 0 ..< b.custom_metrics_count {
 		res.metric_values[i] = b.custom_metrics[i].value
 		res.metric_unit_lens[i] = copy(res.metric_units[i][:], b.custom_metrics[i].unit)
+		res.metric_better[i] = b.custom_metrics[i].better
 	}
 	return
 }
@@ -158,8 +160,9 @@ _store_batch_custom_metrics :: proc(
 	for j in 0 ..< dst_count^ {
 		unit := string(br.metric_units[j][:br.metric_unit_lens[j]])
 		dst[j] = Custom_Metric {
-			unit  = strings.clone(unit, allocator),
-			value = br.metric_values[j],
+			unit   = strings.clone(unit, allocator),
+			value  = br.metric_values[j],
+			better = br.metric_better[j],
 		}
 	}
 }
@@ -444,6 +447,7 @@ _execute_entry :: proc(
 	result.stats = st
 	// The timed samples ran first, so their violation is the first one.
 	violation := &zero_check if zero_check.zero_alloc_violated else &heap_counter
+	result.zero_alloc = expect_zero
 	result.zero_alloc_failed = expect_zero && violation.zero_alloc_violated
 	if result.zero_alloc_failed {
 		s.failed_zero_alloc += 1

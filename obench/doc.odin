@@ -211,12 +211,22 @@ shift of the rest. Reports keep every sample for this (`samples_ns`, since forma
 along with each sample's overhead-adjusted integer batch duration (`samples_batch_ns`, since
 format version 5) for downstream exact integer analysis. Against an older report without
 samples, Welch's t-test on the means is used instead.
+
+Since format version 6, a report also records where and how it was made, so history tools can
+place it: `created_at` (UTC), the `git` commit, branch and whether the tree was dirty, the
+GitHub Actions run in `ci`, the CPU model, core count and an optional `--machine` label in
+`machine`, the `-microarch`, bounds checks and compiler commit in `build`, the run's
+settings in `config`, and the clock calibration in `clock`. Every benchmark adds
+`peak_heap_bytes`, whether it was checked as `@zero_alloc` and failed, and how much of its
+time was clock overhead. The CLI takes the commit from `git` in the directory it runs, and a
+program with its own `main` from `OBENCH_GIT_COMMIT` or GitHub Actions' `GITHUB_SHA`. A custom
+metric can say which way it improves with the `better` argument of `report_metric`.
 `--fail-on-regression` turns regressions into exit status 1, which makes it usable as a CI
 gate. A baseline file that can't be read also fails the run, so a typo in the path doesn't
 pass silently. A baseline that holds none of a suite's benchmarks (a renamed suite, or the
 wrong file) prints a warning and fails the run under `--fail-on-regression`. So does a
-baseline built with another optimization mode, OS, or architecture, because its timings
-can't be compared: one saved from an `-o:none` build would make every benchmark look faster
+baseline built with another optimization mode, OS, architecture, `-microarch`, or bounds-check
+setting, because its timings can't be compared: one saved from an `-o:none` build would make every benchmark look faster
 and hide a real regression. The same goes for a baseline that counted allocations the other
 way when it has a benchmark that allocates; reports older than format version 4 counted them
 in every timed sample, so against one of them those benchmarks look faster. Save the
@@ -266,6 +276,8 @@ pick up these environment variables. Command-line flags of the same name overrid
 	OBENCH_JSON, OBENCH_MD           Report paths
 	OBENCH_CSV                       Report path
 	OBENCH_SPALL                     Trace path
+	OBENCH_MACHINE                   Same as --machine
+	OBENCH_GIT_COMMIT, _BRANCH, _DIRTY  The commit for the report (set by the CLI)
 	OBENCH_NO_COLOR, NO_COLOR        Disable colors
 	FORCE_COLOR                      Keep colors when the output isn't a terminal
 

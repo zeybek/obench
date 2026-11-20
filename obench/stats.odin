@@ -14,8 +14,19 @@ User-defined domain metric reported via `report_metric(b, value, unit)`
 (modeled after Go's `testing.B.ReportMetric` and Google Benchmark's `Counter`).
 */
 Custom_Metric :: struct {
-	unit:  string `json:"unit"`,
-	value: f64 `json:"value"`,
+	unit:   string `json:"unit"`,
+	value:  f64 `json:"value"`,
+	better: Metric_Better `json:"better,omitempty"`,
+}
+
+/*
+Which way a custom metric improves, for tools that track it over time. Reports write the name,
+such as `"Lower_Is_Better"`, and leave `Unknown` out.
+*/
+Metric_Better :: enum u8 {
+	Unknown,
+	Lower_Is_Better,
+	Higher_Is_Better,
 }
 
 /*

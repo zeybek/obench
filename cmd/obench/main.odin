@@ -54,6 +54,7 @@ CLI_Options :: struct {
 	md_path:                  string,
 	csv_path:                 string,
 	spall_path:               string,
+	machine:                  string,
 	threshold_pct:            f64,
 	zero_alloc:               bool,
 	untimed_allocs:           bool,
@@ -132,8 +133,9 @@ RUN OPTIONS:
       --threshold <pct>          Minimum median change counted as significant (default: 2.0)
       --fail-on-regression       Exit with status 1 if a benchmark regressed significantly,
                                  the baseline holds none of a suite's benchmarks, it was
-                                 built with another -o mode, OS, or arch, or it counted
-                                 allocations the other way (see --timed-allocs)
+                                 built with another -o mode, OS, arch, -microarch, or
+                                 bounds-check setting, or it counted allocations the other
+                                 way (see --timed-allocs)
       --fail-on-alloc-regression Exit with status 1 if a benchmark allocates more per operation
                                  (heap or temp, count or bytes) than in the baseline
       --json <file>              Write a JSON report (with compare: the comparison as JSON)
@@ -141,6 +143,7 @@ RUN OPTIONS:
                                  for a job summary or a PR comment)
       --csv <file>               Write an RFC 4180 CSV report
       --spall <file>             Write a core:prof/spall trace (one file per package)
+      --machine <label>          Name the test machine in the JSON report (machine.label)
       --no-color                 Disable ANSI colors. They are also off when NO_COLOR is set
                                  or the output isn't a terminal (FORCE_COLOR=1 keeps them)
       --no-histogram             Hide distribution sparklines
@@ -186,6 +189,7 @@ _Cli_Flags :: struct {
 	md:                       string,
 	csv:                      string,
 	spall:                    string,
+	machine:                  string,
 	format:                   string,
 	zero_alloc:               bool,
 	untimed_allocs:           bool,
@@ -364,6 +368,7 @@ parse_cli_args :: proc(
 	opts.md_path = f.md
 	opts.csv_path = f.csv
 	opts.spall_path = f.spall
+	opts.machine = f.machine
 	opts.zero_alloc = f.zero_alloc
 	opts.untimed_allocs = f.untimed_allocs
 	opts.timed_allocs = f.timed_allocs
@@ -1457,6 +1462,9 @@ _runtime_args :: proc(
 	if opts.no_histogram {
 		append(&args, "--no-histogram")
 	}
+	if opts.machine != "" {
+		append(&args, "--machine", opts.machine)
+	}
 	if opts.load_baseline != "" {
 		append(&args, "--baseline", opts.load_baseline)
 		if outputs.match_baseline_suite {
@@ -2082,6 +2090,7 @@ main :: proc() {
 		os.exit(EXIT_USAGE)
 	}
 
+	set_git_environment(opts.target_path)
 	packages, unparsed := discover_all_packages(opts.target_path)
 	defer {
 		for &pkg in packages {

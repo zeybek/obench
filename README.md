@@ -104,7 +104,7 @@ obench --baseline main.json --fail-on-regression
 
 A change counts as a regression when the Mann-Whitney U test on the samples of both runs finds a difference at the 5% level and the median moved by more than `--threshold` percent (2% by default). Shared CI runners are noisy, so a real change can still drown in their noise. For a gate, raise the sample count with `-n` or run it on a dedicated machine.
 
-A baseline whose times can't be compared fails the gate too: one built with another `-o` mode, OS, or architecture, and one that counted allocations the other way while it has a benchmark that allocates. obench counts allocations in an untimed batch after the timed samples, and reports older than format version 4 counted them in every timed sample, which made the benchmarks that allocate slower. Save such a baseline again, or run with `--timed-allocs` until you do.
+A baseline whose times can't be compared fails the gate too: one built with another `-o` mode, OS, architecture, `-microarch`, or bounds-check setting, and one that counted allocations the other way while it has a benchmark that allocates. obench counts allocations in an untimed batch after the timed samples, and reports older than format version 4 counted them in every timed sample, which made the benchmarks that allocate slower. Save such a baseline again, or run with `--timed-allocs` until you do.
 
 `obench compare main.json pr.json --md "$GITHUB_STEP_SUMMARY"` writes the comparison as Markdown for the job summary, with the verdict on the first line, and `--json` writes it for a bot.
 
