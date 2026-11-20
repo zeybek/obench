@@ -277,6 +277,27 @@ _execute_entry :: proc(
 			// Stop before a probe that would run past the budget.
 			out_of_time :=
 				i64(time.tick_since(probe_start)) + batch_wall * i64(growth) > probe_wall_budget
+			// A probe that stalled (an interrupt, a page fault, a busy host) would end the
+			// calibration with a batch far too small, so the probe that would end it runs once
+			// more while the budget allows, and the faster run counts.
+			if (ns >= target_ns || out_of_time) &&
+			   i64(time.tick_since(probe_start)) + batch_wall <= probe_wall_budget {
+				again_start := time.tick_now()
+				again := _run_batch(&info, probe_batch, nil, nil)
+				again_wall := i64(time.tick_since(again_start))
+				if cfg.reset_temp_per_iter {
+					runtime.arena_free_all(temp_arena)
+				}
+				if again.error != .None {
+					return _fail_entry(s, &result, again.error)
+				}
+				ns = min(ns, again.ns)
+				batch_wall = min(batch_wall, again_wall)
+				growth = ns <= 0 ? 10 : clamp(int(target_ns / max(ns, 1)), 2, 16)
+				out_of_time =
+					i64(time.tick_since(probe_start)) + batch_wall * i64(growth) >
+					probe_wall_budget
+			}
 			if ns >= target_ns || probe_batch >= 10_000_000 || out_of_time {
 				if out_of_time && ns < target_ns {
 					batch_size = probe_batch // Growing it would make every sample as slow.
