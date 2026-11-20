@@ -11,9 +11,10 @@ nothing and fails when the committed file differs from a fresh run by more than 
 digits, which vary with the platform's math library; CI runs that.
 
 The samples, the Welch and Mann-Whitney statistics, the t quantiles, and the geomean come
-straight from numpy and scipy. scipy has no Big-O fitter, so the complexity cases come from
-a second implementation of the rule `estimate_complexity` documents, built on
-numpy.linalg.lstsq and scipy.stats.f. Cases whose outcome sits within rounding of a
+straight from numpy and scipy. scipy has no Big-O fitter and no Hodges-Lehmann interval, so
+the complexity cases and the shifts come from second implementations of the rules
+`estimate_complexity` and `hodges_lehmann_shift` document, built on numpy.linalg.lstsq,
+scipy.stats.f, and numpy. Cases whose outcome sits within rounding of a
 decision threshold are drawn again, so a last-digit difference can't flip a decision.
 """
 
@@ -90,6 +91,68 @@ def sample_entry(v):
     }
 
 
+def lag1(values):
+    """Lag-1 autocorrelation, as obench's lag1_autocorrelation computes it."""
+    v = np.asarray(values, dtype=float)
+    if v.size < 3:
+        return 0.0
+    d = v - v.mean()
+    den = float(np.dot(d, d))
+    return 0.0 if den <= 0 else float(np.dot(d[:-1], d[1:]) / den)
+
+
+def exact_u_cut(n, m):
+    """Largest k with P(U < k) <= 0.025 for n values against m without ties."""
+    counts = [[None] * (m + 1) for _ in range(n + 1)]
+    for i in range(n + 1):
+        for j in range(m + 1):
+            if i == 0 or j == 0:
+                counts[i][j] = np.zeros(1)
+                counts[i][j][0] = 1
+                continue
+            c = np.zeros(i * j + 1)
+            prev_i = counts[i - 1][j]
+            c[j : j + prev_i.size] += prev_i
+            prev_j = counts[i][j - 1]
+            c[: prev_j.size] += prev_j
+            counts[i][j] = c
+    dist = counts[n][m] / counts[n][m].sum()
+    k, cum = 0, 0.0
+    for u, prob in enumerate(dist):
+        cum += prob
+        if cum > 0.025:
+            break
+        k = u + 1
+    return k
+
+
+def hodges_lehmann(a, b):
+    """Shift of `a` against `b` in percent with its 95% interval, the rule hodges_lehmann_shift
+    documents: every pairwise log ratio, the exact U distribution up to 20 values a side, and
+    above that the normal approximation with autocorrelation-adjusted effective sizes. None
+    when a rounding difference could move the cut by one."""
+    la = np.sort(np.log(np.maximum(a, 1e-6)))
+    lb = np.sort(np.log(np.maximum(b, 1e-6)))
+    d = np.sort(np.subtract.outer(la, lb).ravel())
+    total, n, m = d.size, la.size, lb.size
+    median = (d[(total - 1) // 2] + d[total // 2]) / 2
+    if n <= 20 and m <= 20:
+        k = exact_u_cut(n, m)
+    else:
+        def effective(count, r):
+            r = min(max(r, 0.0), 0.95)
+            return max(count * (1 - r) / (1 + r), 2.0)
+
+        ne, me = effective(n, lag1(a)), effective(m, lag1(b))
+        x = total / 2 - stats.norm.ppf(0.975) * total * math.sqrt((ne + me + 1) / (12 * ne * me))
+        if abs(x - round(x)) < 1e-9:
+            return None
+        k = math.floor(x)
+    k = min(max(k, 1), total // 2)
+    pct = lambda v: (math.exp(v) - 1) * 100
+    return pct(median), pct(d[k - 1]), pct(d[total - k])
+
+
 def pair_entry(a, b):
     """`a` is the current run and `b` the baseline, as in compare_baseline(a, b)."""
     a, b = np.asarray(a), np.asarray(b)
@@ -106,6 +169,14 @@ def pair_entry(a, b):
     if abs(abs(welch.statistic) / t_crit - 1.0) < MARGIN:
         return None
     shift = float(mw.statistic) - len(a) * len(b) / 2.0
+    hl = hodges_lehmann(a, b)
+    if hl is None:
+        return None
+    hl_shift, hl_low, hl_high = hl
+    if abs(hl_low - NOISE_THRESHOLD_PCT) < MARGIN * NOISE_THRESHOLD_PCT:
+        return None
+    if abs(hl_high + NOISE_THRESHOLD_PCT) < MARGIN * NOISE_THRESHOLD_PCT:
+        return None
     return {
         "welch_t": float(welch.statistic),
         "welch_df": float(welch.df),
@@ -113,7 +184,11 @@ def pair_entry(a, b):
         "p": p,
         "abs_z": float(stats.norm.isf(p / 2.0)) if p < 1.0 else 0.0,
         "z_sign": 0 if p >= 1.0 else (1 if shift > 0 else -1),
-        "rank_significant": bool(p < 0.05 and abs(delta) >= NOISE_THRESHOLD_PCT),
+        "hl_shift_pct": hl_shift,
+        "hl_low_pct": hl_low,
+        "hl_high_pct": hl_high,
+        # The whole 95% interval of the shift lies beyond the threshold.
+        "rank_significant": bool(hl_low > NOISE_THRESHOLD_PCT or hl_high < -NOISE_THRESHOLD_PCT),
         "welch_significant": bool(abs(welch.statistic) >= t_crit and abs(delta) >= NOISE_THRESHOLD_PCT),
     }
 

@@ -120,6 +120,11 @@ Baseline_Diff :: struct {
 	welch_df:         f64, // Welch-Satterthwaite degrees of freedom
 	rank_test:        bool, // Significance came from the Mann-Whitney U test (both sides had samples)
 	p_value:          f64, // Two-sided p-value of the Mann-Whitney U test when `rank_test` is set
+	// With `rank_test`: the Hodges-Lehmann shift of the typical sample in percent, and its 95%
+	// confidence interval (see `hodges_lehmann_shift`), which decides `is_significant`.
+	shift_pct:        f64,
+	shift_low_pct:    f64,
+	shift_high_pct:   f64,
 	is_significant:   bool,
 	is_regression:    bool,
 	is_improvement:   bool,
@@ -601,14 +606,17 @@ mann_whitney_u :: proc(
 /*
 Compares `current` stats against `baseline` stats.
 
-A change is significant when the samples differ at the 5% level and the median moved by at
-least `noise_threshold_pct` percent (e.g. `2.0` for 2%). When both sides carry their
-samples (`samples_ns`), the test is the Mann-Whitney U test. Otherwise, as for reports
-written before format version 3, Welch's t-test on the means and standard deviations is
-used, with the Welch-Satterthwaite degrees of freedom. The Welch statistic is filled in
-either way.
+When both sides carry their samples (`samples_ns`), the change is the Hodges-Lehmann shift
+of the typical sample with its 95% confidence interval (see `hodges_lehmann_shift`), and it
+counts as a regression only when the whole interval lies above `noise_threshold_pct` percent
+(e.g. `2.0` for 2%), as an improvement only when it lies below the negative threshold. A
+shift that could still be smaller than the threshold isn't flagged, however small its
+p-value. The Mann-Whitney U p-value is still filled in for the report. Without samples, as
+for reports written before format version 3, the change is significant when Welch's t-test
+on the means finds a difference at the 5% level and the median moved by at least the
+threshold.
 
-The rank test sorts copies of the samples with `allocator`.
+The rank statistics sort copies of the samples with `allocator`.
 */
 @(require_results)
 compare_baseline :: proc(
@@ -652,14 +660,24 @@ compare_baseline :: proc(
 	)
 	rank_test := len(current.samples_ns) >= 2 && len(baseline.samples_ns) >= 2
 	p_value: f64 = 1
-	samples_differ: bool
+	shift, shift_low, shift_high: f64
+	regression, improvement: bool
 	if rank_test {
 		_, _, p_value = mann_whitney_u(current.samples_ns, baseline.samples_ns, allocator)
-		samples_differ = p_value < 0.05
+		shift, shift_low, shift_high, _ = hodges_lehmann_shift(
+			current.samples_ns,
+			baseline.samples_ns,
+			allocator = allocator,
+		)
+		regression = shift_low > noise_threshold_pct
+		improvement = shift_high < -noise_threshold_pct
 	} else {
-		samples_differ = welch_df > 0 && abs(welch_t) >= t_critical_975(welch_df)
+		samples_differ := welch_df > 0 && abs(welch_t) >= t_critical_975(welch_df)
+		moved := samples_differ && abs(delta_median) >= noise_threshold_pct
+		regression = moved && delta_median > 0
+		improvement = moved && delta_median < 0
 	}
-	significant := samples_differ && abs(delta_median) >= noise_threshold_pct
+	significant := regression || improvement
 
 	// Per-operation counts are a count divided by the iterations, so allow for rounding.
 	grew :: proc(current, baseline: f64) -> bool {
@@ -681,9 +699,12 @@ compare_baseline :: proc(
 		welch_df = welch_df,
 		rank_test = rank_test,
 		p_value = rank_test ? p_value : 0,
+		shift_pct = shift,
+		shift_low_pct = shift_low,
+		shift_high_pct = shift_high,
 		is_significant = significant,
-		is_regression = significant && delta_median > 0,
-		is_improvement = significant && delta_median < 0,
+		is_regression = regression,
+		is_improvement = improvement,
 		allocs_grew = allocs_grew,
 	}
 }

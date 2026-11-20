@@ -38,6 +38,9 @@ Ref_Pair :: struct {
 	p:                 f64,
 	abs_z:             f64,
 	z_sign:            int,
+	hl_shift_pct:      f64,
+	hl_low_pct:        f64,
+	hl_high_pct:       f64,
 	rank_significant:  bool,
 	welch_significant: bool,
 }
@@ -214,6 +217,22 @@ test_comparisons_match_scipy :: proc(t: ^testing.T) {
 		)
 
 		diff := obench.compare_baseline(cur, base, 2.0)
+		hl := [3][2]f64 {
+			{diff.shift_pct, pr.hl_shift_pct},
+			{diff.shift_low_pct, pr.hl_low_pct},
+			{diff.shift_high_pct, pr.hl_high_pct},
+		}
+		for h, k in hl {
+			testing.expectf(
+				t,
+				_close(h[0], h[1], 1e-9, 1e-9),
+				"pair %d: Hodges-Lehmann value %d is %v, reference %v",
+				i,
+				k,
+				h[0],
+				h[1],
+			)
+		}
 		testing.expectf(
 			t,
 			diff.rank_test && diff.is_significant == pr.rank_significant,

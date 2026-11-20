@@ -23,6 +23,11 @@ Comparison_Summary :: struct {
 	// Matched benchmarks whose heap or temp allocations or bytes per operation went up.
 	alloc_regressions:       int,
 	geomean_delta_pct:       f64,
+	// How many of the matched benchmarks the noise between samples would flag on average, at
+	// most: each interval has a 5% chance of missing the true change. A machine that ran at
+	// another speed between the two runs shifts every sample of one run, which this doesn't
+	// cover.
+	expected_false_alarms:   f64,
 	// The reports come from builds with a different optimization mode, OS, or architecture,
 	// so their timings can't be compared.
 	build_mismatch:          bool,
@@ -153,6 +158,7 @@ compare_documents :: proc(
 	if ratio_count > 0 {
 		summary.geomean_delta_pct = (math.exp(ratio_log_sum / f64(ratio_count)) - 1.0) * 100.0
 	}
+	summary.expected_false_alarms = 0.05 * f64(summary.matched)
 	return out[:], summary
 }
 
@@ -162,12 +168,18 @@ _row_name :: proc(r: Comparison_Row, several_suites: bool) -> string {
 	return several_suites ? fmt.tprintf("%s/%s", r.suite_name, r.full_name) : r.full_name
 }
 
-// `p=0.0123` for the Mann-Whitney U test, `|t|=2.31` for Welch's t-test.
+// `[+1.2%, +3.4%] p=0.0123`, the 95% interval of the shift and the Mann-Whitney U p-value, or
+// `|t|=2.31` for Welch's t-test when a report has no samples.
 @(private = "file")
 _significance :: proc(diff: Baseline_Diff) -> string {
 	switch {
 	case diff.rank_test:
-		return fmt.tprintf("p=%.4f", diff.p_value)
+		return fmt.tprintf(
+			"[%+.1f%%, %+.1f%%] p=%.4f",
+			diff.shift_low_pct,
+			diff.shift_high_pct,
+			diff.p_value,
+		)
 	case math.is_inf(diff.welch_t, 0):
 		return "|t|=inf"
 	}
@@ -307,6 +319,16 @@ write_comparison :: proc(
 		p.reset,
 		summary.unchanged,
 	)
+	if summary.matched > 0 {
+		fmt.wprintf(
+			w,
+			"%sExpected false alarms: at most %.1f of %d (5%% each), more if the machine ran at another speed between the two runs%s\n",
+			p.dim,
+			summary.expected_false_alarms,
+			summary.matched,
+			p.reset,
+		)
+	}
 	if summary.alloc_regressions > 0 {
 		fmt.wprintf(
 			w,
@@ -356,13 +378,14 @@ write_comparison_markdown :: proc(
 
 	fmt.wprintf(
 		w,
-		"**obench compare:** %d slower, %d faster, %d unchanged of %d matched, geomean %+.2f%% (threshold %.1f%%)\n\n",
+		"**obench compare:** %d slower, %d faster, %d unchanged of %d matched, geomean %+.2f%% (threshold %.1f%%). Expected false alarms: at most %.1f, more if the machine ran at another speed between the two runs.\n\n",
 		summary.regressions,
 		summary.improvements,
 		summary.unchanged,
 		summary.matched,
 		summary.geomean_delta_pct,
 		noise_threshold_pct,
+		summary.expected_false_alarms,
 	)
 	warned := false
 	if summary.build_mismatch {
@@ -469,6 +492,9 @@ _JSON_Comparison_Row :: struct {
 	test:                  string `json:"test"`, // mann-whitney or welch
 	p_value:               f64 `json:"p_value"`,
 	welch_t:               f64 `json:"welch_t"`,
+	shift_pct:             f64 `json:"shift_pct"`, // Hodges-Lehmann shift, with its 95% interval
+	shift_low_pct:         f64 `json:"shift_low_pct"`,
+	shift_high_pct:        f64 `json:"shift_high_pct"`,
 	baseline_bytes_per_op: f64 `json:"baseline_bytes_per_op"`,
 	current_bytes_per_op:  f64 `json:"current_bytes_per_op"`,
 	delta_bytes_pct:       f64 `json:"delta_bytes_pct"`,
@@ -525,6 +551,9 @@ write_comparison_json :: proc(
 		o.p_value = r.diff.p_value
 		o.welch_t =
 			math.is_inf(r.diff.welch_t, 0) || math.is_nan(r.diff.welch_t) ? 0 : r.diff.welch_t
+		o.shift_pct = r.diff.shift_pct
+		o.shift_low_pct = r.diff.shift_low_pct
+		o.shift_high_pct = r.diff.shift_high_pct
 		o.current_bytes_per_op = r.current_bytes_per_op
 		o.delta_bytes_pct = r.diff.delta_bytes_pct
 		o.allocs_grew = r.diff.allocs_grew

@@ -55,4 +55,4 @@ Allocations are often the biggest cost in a hot path, and the count is exact whe
 
 ## Compare runs, not numbers from memory
 
-Save a run with `--save-baseline main.json` and check the next one with `--baseline main.json`, or compare two saved reports with `obench compare`. A baseline only means something against a run from the same machine and the same build settings, so `--fail-on-regression` fails against one built with another `-o` mode, OS or architecture. `--threshold` sets how big a change of the median has to be before it counts, 2% by default.
+Save a run with `--save-baseline main.json` and check the next one with `--baseline main.json`, or compare two saved reports with `obench compare`. A baseline only means something against a run from the same machine and the same build settings, so `--fail-on-regression` fails against one built with another `-o` mode, OS or architecture. `--threshold` sets how big a change has to be before it counts, 2% by default, and the whole 95% confidence interval of the change has to clear it.

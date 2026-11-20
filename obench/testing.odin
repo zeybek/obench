@@ -93,7 +93,8 @@ suite_failure_messages :: proc(s: ^Suite, allocator := context.temp_allocator) -
 			)
 		}
 		if r.diff.is_regression && s.config.fail_on_regression {
-			test := r.diff.rank_test ? fmt.tprintf("p=%.4f", r.diff.p_value) : "Welch's t-test"
+			test :=
+				r.diff.rank_test ? fmt.tprintf("95%% interval %+.1f%% to %+.1f%%", r.diff.shift_low_pct, r.diff.shift_high_pct) : "Welch's t-test"
 			append(
 				&out,
 				fmt.aprintf(
