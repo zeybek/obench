@@ -84,6 +84,12 @@ set +e
 set -e
 [ "$code" -eq 1 ] || fail "expected compare to exit 1 for a 10x slowdown, got $code"
 
+step "compare writes the comparison as Markdown and JSON"
+"$OBENCH" compare "$WORK_N/fast.json" "$WORK_N/slow.json" --md "$WORK_N/cmp.md" --json "$WORK_N/cmp.json" \
+  >/dev/null
+grep -q '^\*\*obench compare:\*\* 1 slower' "$WORK/cmp.md" || fail "the Markdown comparison has no verdict line"
+grep -q '"verdict": "slower"' "$WORK/cmp.json" || fail "the JSON comparison has no slower benchmark"
+
 step "colors are off when the output isn't a terminal or NO_COLOR is set"
 ESC="$(printf '\033')"
 "$OBENCH" "$WORK_N/regress" --collection "libs=$ROOT_N" -n 5 -w 2 > "$WORK/run_plain.txt"

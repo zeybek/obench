@@ -1,5 +1,6 @@
 package obench
 
+import "core:encoding/json"
 import "core:fmt"
 import "core:io"
 import "core:math"
@@ -36,6 +37,158 @@ _match_key :: proc(e: Export_Entry) -> string {
 }
 
 /*
+One benchmark of a comparison: found in both reports, or failed in the candidate after it
+worked in the baseline, in which case `error` holds the candidate's error and `diff` is empty.
+*/
+Comparison_Row :: struct {
+	suite_name:            string,
+	full_name:             string,
+	baseline_p50_ns:       f64,
+	current_p50_ns:        f64,
+	baseline_bytes_per_op: f64,
+	current_bytes_per_op:  f64,
+	diff:                  Baseline_Diff,
+	error:                 string,
+}
+
+/*
+Matches the benchmarks of `candidate` with those of `baseline` by suite and full name and
+compares every pair with `compare_baseline`. Returns a row for each match and for each
+benchmark that worked in the baseline but failed in the candidate, in the candidate's order,
+and the summary. The rows are allocated with `allocator`; `write_comparison`,
+`write_comparison_markdown`, and `write_comparison_json` print them.
+*/
+@(require_results)
+compare_documents :: proc(
+	baseline, candidate: Export_Document,
+	noise_threshold_pct: f64 = 2.0,
+	allocator := context.temp_allocator,
+) -> (
+	rows: []Comparison_Row,
+	summary: Comparison_Summary,
+) {
+	baseline_by_key := make(map[string]Export_Entry, context.temp_allocator)
+	for &e in baseline.benchmarks {
+		if e.error == "" {
+			baseline_by_key[_match_key(e)] = e
+		}
+	}
+	summary.build_mismatch = _builds_differ(_document_build(baseline), _document_build(candidate))
+	if baseline.untimed_allocs != candidate.untimed_allocs {
+		for &e in baseline.benchmarks {
+			if e.error == "" &&
+			   _allocates(e.allocs_per_op, e.resizes_per_op, e.temp_allocs_per_op) {
+				summary.alloc_counting_mismatch = true
+				break
+			}
+		}
+	}
+
+	out := make([dynamic]Comparison_Row, allocator)
+	seen := make(map[string]bool, context.temp_allocator)
+	ratio_log_sum: f64 = 0
+	ratio_count := 0
+	for &e in candidate.benchmarks {
+		key := _match_key(e)
+		old_e, exists := baseline_by_key[key]
+		if e.error != "" {
+			if exists {
+				seen[key] = true
+				summary.errored += 1
+				append(
+					&out,
+					Comparison_Row {
+						suite_name = e.suite_name,
+						full_name = e.full_name,
+						baseline_p50_ns = old_e.p50_ns,
+						baseline_bytes_per_op = old_e.alloc_bytes_per_op,
+						error = e.error,
+					},
+				)
+			}
+			continue
+		}
+		if !exists {
+			summary.only_in_candidate += 1
+			continue
+		}
+		seen[key] = true
+		old_st := _export_entry_stats(old_e)
+		new_st := _export_entry_stats(e)
+		diff := compare_baseline(new_st, old_st, noise_threshold_pct)
+		summary.matched += 1
+		if diff.allocs_grew {
+			summary.alloc_regressions += 1
+		}
+		if ratio := 1.0 + diff.delta_median_pct / 100.0; diff.has_baseline && ratio > 0 {
+			ratio_log_sum += math.ln(ratio)
+			ratio_count += 1
+		}
+		switch {
+		case diff.is_improvement:
+			summary.improvements += 1
+		case diff.is_regression:
+			summary.regressions += 1
+		case:
+			summary.unchanged += 1
+		}
+		append(
+			&out,
+			Comparison_Row {
+				suite_name = e.suite_name,
+				full_name = e.full_name,
+				baseline_p50_ns = old_st.p50_ns,
+				current_p50_ns = new_st.p50_ns,
+				baseline_bytes_per_op = old_st.alloc_bytes_per_op,
+				current_bytes_per_op = new_st.alloc_bytes_per_op,
+				diff = diff,
+			},
+		)
+	}
+	for key in baseline_by_key {
+		if key not_in seen {
+			summary.only_in_baseline += 1
+		}
+	}
+	if ratio_count > 0 {
+		summary.geomean_delta_pct = (math.exp(ratio_log_sum / f64(ratio_count)) - 1.0) * 100.0
+	}
+	return out[:], summary
+}
+
+// The benchmark's name in a comparison: with its suite when the report holds several.
+@(private = "file")
+_row_name :: proc(r: Comparison_Row, several_suites: bool) -> string {
+	return several_suites ? fmt.tprintf("%s/%s", r.suite_name, r.full_name) : r.full_name
+}
+
+// `p=0.0123` for the Mann-Whitney U test, `|t|=2.31` for Welch's t-test.
+@(private = "file")
+_significance :: proc(diff: Baseline_Diff) -> string {
+	switch {
+	case diff.rank_test:
+		return fmt.tprintf("p=%.4f", diff.p_value)
+	case math.is_inf(diff.welch_t, 0):
+		return "|t|=inf"
+	}
+	return fmt.tprintf("|t|=%.2f", abs(diff.welch_t))
+}
+
+// `64 B → 128 B (+100.0%)`, or `0 B → 0 B` when neither side allocates.
+@(private = "file")
+_bytes_change :: proc(r: Comparison_Row) -> string {
+	if r.baseline_bytes_per_op > 0 || r.current_bytes_per_op > 0 {
+		return fmt.tprintf(
+			"%s → %s (%+.1f%%)",
+			format_bytes(r.baseline_bytes_per_op),
+			format_bytes(r.current_bytes_per_op),
+			r.diff.delta_bytes_pct,
+		)
+	}
+	return "0 B → 0 B"
+}
+
+/*
 Writes a `benchstat`-style comparison of `candidate` against `baseline` to `w`: median
 delta, the significance test (the Mann-Whitney U p-value, or Welch's |t| when a report has
 no samples), and bytes per operation for every benchmark found in both (matched by suite and
@@ -50,45 +203,29 @@ write_comparison :: proc(
 	summary: Comparison_Summary,
 ) {
 	p := _palette(color_output)
-
-	baseline_by_key := make(map[string]Export_Entry, context.temp_allocator)
-	for &e in baseline.benchmarks {
-		if e.error == "" {
-			baseline_by_key[_match_key(e)] = e
-		}
-	}
+	rows: []Comparison_Row
+	rows, summary = compare_documents(baseline, candidate, noise_threshold_pct)
 	several_suites := _has_several_suites(candidate.benchmarks)
 
-	if base_build, cand_build := _document_build(baseline), _document_build(candidate);
-	   _builds_differ(base_build, cand_build) {
-		summary.build_mismatch = true
+	if summary.build_mismatch {
 		fmt.wprintf(
 			w,
 			"%swarning:%s the baseline was built with %s and the candidate with %s; their timings can't be compared\n",
 			p.red,
 			p.reset,
-			_build_string(base_build),
-			_build_string(cand_build),
+			_build_string(_document_build(baseline)),
+			_build_string(_document_build(candidate)),
 		)
 	}
-	if baseline.untimed_allocs != candidate.untimed_allocs {
-		for &e in baseline.benchmarks {
-			if e.error == "" &&
-			   _allocates(e.allocs_per_op, e.resizes_per_op, e.temp_allocs_per_op) {
-				summary.alloc_counting_mismatch = true
-				break
-			}
-		}
-		if summary.alloc_counting_mismatch {
-			fmt.wprintf(
-				w,
-				"%swarning:%s the baseline counted allocations %s and the candidate %s; the times of benchmarks that allocate can't be compared\n",
-				p.red,
-				p.reset,
-				_alloc_counting_string(baseline.untimed_allocs),
-				_alloc_counting_string(candidate.untimed_allocs),
-			)
-		}
+	if summary.alloc_counting_mismatch {
+		fmt.wprintf(
+			w,
+			"%swarning:%s the baseline counted allocations %s and the candidate %s; the times of benchmarks that allocate can't be compared\n",
+			p.red,
+			p.reset,
+			_alloc_counting_string(baseline.untimed_allocs),
+			_alloc_counting_string(candidate.untimed_allocs),
+		)
 	}
 
 	rt: _Report_Table
@@ -107,110 +244,40 @@ write_comparison :: proc(
 		table.set_cell_alignment(tbl, table.header_row(tbl), col, .Right)
 	}
 
-	seen := make(map[string]bool, context.temp_allocator)
-	ratio_log_sum: f64 = 0
-	ratio_count := 0
-
-	for &e in candidate.benchmarks {
-		key := _match_key(e)
-		old_e, exists := baseline_by_key[key]
-		if e.error != "" {
-			if exists {
-				seen[key] = true
-				summary.errored += 1
-				table.row(tbl)
-				row := table.last_row(tbl)
-				name :=
-					several_suites ? fmt.tprintf("%s/%s", e.suite_name, e.full_name) : e.full_name
-				_set_cell(tbl, row, 0, name, .Left)
-				_set_cell(tbl, row, 1, format_duration_ns(old_e.p50_ns))
-				_set_cell(tbl, row, 2, "-")
-				_set_cell(tbl, row, 3, fmt.tprintf("%sERROR%s", p.red, p.reset))
-				_set_cell(tbl, row, 4, "-")
-				_set_cell(tbl, row, 5, e.error, .Left)
-			}
+	for r in rows {
+		table.row(tbl)
+		row := table.last_row(tbl)
+		_set_cell(tbl, row, 0, _row_name(r, several_suites), .Left)
+		_set_cell(tbl, row, 1, format_duration_ns(r.baseline_p50_ns))
+		if r.error != "" {
+			_set_cell(tbl, row, 2, "-")
+			_set_cell(tbl, row, 3, fmt.tprintf("%sERROR%s", p.red, p.reset))
+			_set_cell(tbl, row, 4, "-")
+			_set_cell(tbl, row, 5, r.error, .Left)
 			continue
-		}
-		if !exists {
-			summary.only_in_candidate += 1
-			continue
-		}
-		seen[key] = true
-		old_st := _export_entry_stats(old_e)
-		new_st := _export_entry_stats(e)
-		diff := compare_baseline(new_st, old_st, noise_threshold_pct)
-		summary.matched += 1
-		if diff.allocs_grew {
-			summary.alloc_regressions += 1
-		}
-
-		if ratio := 1.0 + diff.delta_median_pct / 100.0; diff.has_baseline && ratio > 0 {
-			ratio_log_sum += math.ln(ratio)
-			ratio_count += 1
 		}
 
 		delta_color, verdict := p.dim, "~"
 		switch {
-		case diff.is_improvement:
+		case r.diff.is_improvement:
 			delta_color, verdict = p.green, "faster"
-			summary.improvements += 1
-		case diff.is_regression:
+		case r.diff.is_regression:
 			delta_color, verdict = p.red, "SLOWER"
-			summary.regressions += 1
-		case:
-			summary.unchanged += 1
 		}
-
-		bytes_str := "0 B → 0 B"
-		if old_st.alloc_bytes_per_op > 0 || new_st.alloc_bytes_per_op > 0 {
-			bytes_str = fmt.tprintf(
-				"%s → %s (%+.1f%%)",
-				format_bytes(old_st.alloc_bytes_per_op),
-				format_bytes(new_st.alloc_bytes_per_op),
-				diff.delta_bytes_pct,
-			)
-		}
-		if diff.allocs_grew {
+		bytes_str := _bytes_change(r)
+		if r.diff.allocs_grew {
 			bytes_str = fmt.tprintf("%s %sallocs grew%s", bytes_str, p.red, p.reset)
 		}
 
-		table.row(tbl)
-		row := table.last_row(tbl)
-		_set_cell(
-			tbl,
-			row,
-			0,
-			several_suites ? fmt.tprintf("%s/%s", e.suite_name, e.full_name) : e.full_name,
-			.Left,
-		)
-		_set_cell(tbl, row, 1, format_duration_ns(old_st.p50_ns))
-		_set_cell(tbl, row, 2, format_duration_ns(new_st.p50_ns))
+		_set_cell(tbl, row, 2, format_duration_ns(r.current_p50_ns))
 		_set_cell(
 			tbl,
 			row,
 			3,
-			fmt.tprintf("%s%+.2f%% %s%s", delta_color, diff.delta_median_pct, verdict, p.reset),
+			fmt.tprintf("%s%+.2f%% %s%s", delta_color, r.diff.delta_median_pct, verdict, p.reset),
 		)
-		significance: string
-		switch {
-		case diff.rank_test:
-			significance = fmt.tprintf("p=%.4f", diff.p_value)
-		case math.is_inf(diff.welch_t, 0):
-			significance = "|t|=inf"
-		case:
-			significance = fmt.tprintf("|t|=%.2f", abs(diff.welch_t))
-		}
-		_set_cell(tbl, row, 4, significance)
+		_set_cell(tbl, row, 4, _significance(r.diff))
 		_set_cell(tbl, row, 5, bytes_str, .Left)
-	}
-
-	for key in baseline_by_key {
-		if key not_in seen {
-			summary.only_in_baseline += 1
-		}
-	}
-	if ratio_count > 0 {
-		summary.geomean_delta_pct = (math.exp(ratio_log_sum / f64(ratio_count)) - 1.0) * 100.0
 	}
 
 	table.build(tbl, _ansi_width_proc)
@@ -269,6 +336,218 @@ write_comparison :: proc(
 		)
 	}
 	return
+}
+
+/*
+Writes the comparison of `candidate` against `baseline` as GitHub-flavored Markdown, for a job
+summary or a pull request comment: a one-line verdict first, then the warnings, then every
+benchmark in a table inside a `<details>` block.
+*/
+write_comparison_markdown :: proc(
+	w: io.Writer,
+	baseline, candidate: Export_Document,
+	noise_threshold_pct: f64 = 2.0,
+) -> (
+	summary: Comparison_Summary,
+) {
+	rows: []Comparison_Row
+	rows, summary = compare_documents(baseline, candidate, noise_threshold_pct)
+	several_suites := _has_several_suites(candidate.benchmarks)
+
+	fmt.wprintf(
+		w,
+		"**obench compare:** %d slower, %d faster, %d unchanged of %d matched, geomean %+.2f%% (threshold %.1f%%)\n\n",
+		summary.regressions,
+		summary.improvements,
+		summary.unchanged,
+		summary.matched,
+		summary.geomean_delta_pct,
+		noise_threshold_pct,
+	)
+	warned := false
+	if summary.build_mismatch {
+		fmt.wprintf(
+			w,
+			"- The baseline was built with %s and the candidate with %s, so their timings can't be compared.\n",
+			_build_string(_document_build(baseline)),
+			_build_string(_document_build(candidate)),
+		)
+		warned = true
+	}
+	if summary.alloc_counting_mismatch {
+		fmt.wprintf(
+			w,
+			"- The baseline counted allocations %s and the candidate %s, so the times of benchmarks that allocate can't be compared.\n",
+			_alloc_counting_string(baseline.untimed_allocs),
+			_alloc_counting_string(candidate.untimed_allocs),
+		)
+		warned = true
+	}
+	if summary.alloc_regressions > 0 {
+		fmt.wprintf(
+			w,
+			"- %d benchmark(s) allocate more per operation than in the baseline.\n",
+			summary.alloc_regressions,
+		)
+		warned = true
+	}
+	if summary.errored > 0 {
+		fmt.wprintf(w, "- %d benchmark(s) failed in the candidate.\n", summary.errored)
+		warned = true
+	}
+	if summary.only_in_baseline > 0 || summary.only_in_candidate > 0 {
+		fmt.wprintf(
+			w,
+			"- %d only in the baseline and %d only in the candidate weren't compared.\n",
+			summary.only_in_baseline,
+			summary.only_in_candidate,
+		)
+		warned = true
+	}
+	if warned {
+		io.write_string(w, "\n")
+	}
+
+	fmt.wprintf(w, "<details><summary>%d benchmarks</summary>\n\n", len(rows))
+	io.write_string(
+		w,
+		"| benchmark | baseline (p50) | current (p50) | delta | significance | bytes/op |\n",
+	)
+	io.write_string(w, "|:--|--:|--:|--:|--:|:--|\n")
+	for r in rows {
+		name, _ := strings.replace_all(
+			_row_name(r, several_suites),
+			"|",
+			"\\|",
+			context.temp_allocator,
+		)
+		if r.error != "" {
+			fmt.wprintf(
+				w,
+				"| `%s` | %s | - | **ERROR** | - | %s |\n",
+				name,
+				format_duration_ns(r.baseline_p50_ns),
+				r.error,
+			)
+			continue
+		}
+		verdict := "~"
+		switch {
+		case r.diff.is_improvement:
+			verdict = "faster"
+		case r.diff.is_regression:
+			verdict = "**SLOWER**"
+		}
+		bytes_str := _bytes_change(r)
+		if r.diff.allocs_grew {
+			bytes_str = fmt.tprintf("%s **allocs grew**", bytes_str)
+		}
+		fmt.wprintf(
+			w,
+			"| `%s` | %s | %s | %+.2f%% %s | %s | %s |\n",
+			name,
+			format_duration_ns(r.baseline_p50_ns),
+			format_duration_ns(r.current_p50_ns),
+			r.diff.delta_median_pct,
+			verdict,
+			_significance(r.diff),
+			bytes_str,
+		)
+	}
+	io.write_string(w, "\n</details>\n")
+	return
+}
+
+@(private = "file")
+_JSON_Comparison_Row :: struct {
+	suite:                 string `json:"suite"`,
+	name:                  string `json:"name"`,
+	verdict:               string `json:"verdict"`, // faster, slower, unchanged, or error
+	baseline_p50_ns:       f64 `json:"baseline_p50_ns"`,
+	current_p50_ns:        f64 `json:"current_p50_ns"`,
+	delta_median_pct:      f64 `json:"delta_median_pct"`,
+	test:                  string `json:"test"`, // mann-whitney or welch
+	p_value:               f64 `json:"p_value"`,
+	welch_t:               f64 `json:"welch_t"`,
+	baseline_bytes_per_op: f64 `json:"baseline_bytes_per_op"`,
+	current_bytes_per_op:  f64 `json:"current_bytes_per_op"`,
+	delta_bytes_pct:       f64 `json:"delta_bytes_pct"`,
+	allocs_grew:           bool `json:"allocs_grew"`,
+	error:                 string `json:"error,omitempty"`,
+}
+
+@(private = "file")
+_JSON_Comparison :: struct {
+	threshold_pct: f64 `json:"threshold_pct"`,
+	summary:       Comparison_Summary `json:"summary"`,
+	benchmarks:    []_JSON_Comparison_Row `json:"benchmarks"`,
+}
+
+/*
+Writes the comparison of `candidate` against `baseline` as JSON, so a bot doesn't have to
+read the table or redo the statistics: the threshold, the `Comparison_Summary`, and for every
+benchmark its verdict (`faster`, `slower`, `unchanged`, or `error`), the medians, the delta,
+the test with its p-value or Welch's t (0 when infinite), and the bytes per operation.
+*/
+write_comparison_json :: proc(
+	w: io.Writer,
+	baseline, candidate: Export_Document,
+	noise_threshold_pct: f64 = 2.0,
+) -> (
+	summary: Comparison_Summary,
+	err: io.Error,
+) {
+	rows: []Comparison_Row
+	rows, summary = compare_documents(baseline, candidate, noise_threshold_pct)
+	out := make([]_JSON_Comparison_Row, len(rows), context.temp_allocator)
+	for r, i in rows {
+		o := &out[i]
+		o.suite = r.suite_name
+		o.name = r.full_name
+		o.baseline_p50_ns = r.baseline_p50_ns
+		o.baseline_bytes_per_op = r.baseline_bytes_per_op
+		if r.error != "" {
+			o.verdict = "error"
+			o.error = r.error
+			continue
+		}
+		switch {
+		case r.diff.is_improvement:
+			o.verdict = "faster"
+		case r.diff.is_regression:
+			o.verdict = "slower"
+		case:
+			o.verdict = "unchanged"
+		}
+		o.current_p50_ns = r.current_p50_ns
+		o.delta_median_pct = r.diff.delta_median_pct
+		o.test = r.diff.rank_test ? "mann-whitney" : "welch"
+		o.p_value = r.diff.p_value
+		o.welch_t =
+			math.is_inf(r.diff.welch_t, 0) || math.is_nan(r.diff.welch_t) ? 0 : r.diff.welch_t
+		o.current_bytes_per_op = r.current_bytes_per_op
+		o.delta_bytes_pct = r.diff.delta_bytes_pct
+		o.allocs_grew = r.diff.allocs_grew
+	}
+	report := _JSON_Comparison {
+		threshold_pct = noise_threshold_pct,
+		summary       = summary,
+		benchmarks    = out,
+	}
+	opt := json.Marshal_Options {
+		pretty     = true,
+		use_spaces = true,
+		spaces     = 2,
+	}
+	// `json.marshal` rather than `json.marshal_to_writer`, which takes its options by pointer in
+	// Odin dev-2026-10 and by value from dev-2026-11a on.
+	data, marshal_err := json.marshal(report, opt, context.temp_allocator)
+	if marshal_err != nil {
+		return summary, .Unknown
+	}
+	io.write(w, data) or_return
+	io.write_byte(w, '\n') or_return
+	return summary, nil
 }
 
 /*

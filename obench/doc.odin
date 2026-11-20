@@ -224,6 +224,10 @@ baseline again, or run with `--timed-allocs` until then. `obench compare` checks
 reports the same way. Its
 `--fail-on-regression` also fails when a benchmark that worked in the baseline reports an
 error in the candidate; benchmarks found on one side only are listed but don't fail it.
+`--md` and `--json` write the comparison as well: Markdown with a one-line verdict first and
+the table in a `<details>` block, for a job summary or a pull request comment, and JSON with
+the summary and every benchmark's verdict, for a bot (`write_comparison_markdown`,
+`write_comparison_json`).
 
 Allocation counts are exact, so they make a gate that holds even on a noisy shared runner.
 `--fail-on-alloc-regression` fails the run, or `obench compare`, when a benchmark allocates
