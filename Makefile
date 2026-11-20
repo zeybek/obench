@@ -1,4 +1,4 @@
-.PHONY: all build check check-barriers docs fmt fmt-check hooks lint links reference reference-check schema-check instructions-check test test-lib test-cli test-examples smoke bench bench-allocators bench-soa bench-lookup bench-sorting bench-parallel clean
+.PHONY: all build check check-barriers docs fmt fmt-check hooks lint links reference reference-check schema-check instructions-check aa-check test test-lib test-cli test-examples smoke bench bench-allocators bench-soa bench-lookup bench-sorting bench-parallel clean
 
 ODIN ?= odin
 # odinfmt from DanielGavin/ols (tools/odinfmt); see CONTRIBUTING.md.
@@ -70,6 +70,11 @@ schema-check: $(OBENCH_BIN)
 # --instructions counts the same instructions on two runs (needs Valgrind, so Linux).
 instructions-check: $(OBENCH_BIN)
 	OBENCH=$(OBENCH_BIN) scripts/check_instructions.sh
+
+# Unchanged code against itself: three reports from five processes each, compared pairwise;
+# fails when the gate flags more than 5% of the comparisons. About 2.5 minutes on an M2.
+aa-check: $(OBENCH_BIN)
+	OBENCH=$(OBENCH_BIN) scripts/aa_check.sh examples
 
 # Links in the documentation (needs lychee).
 links:
