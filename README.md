@@ -16,7 +16,7 @@
 
 Allocation-aware micro-benchmarking for [Odin](https://odin-lang.org/). It measures time and heap and temp allocations per operation, and compares runs against a saved baseline. It uses only `base:` and `core:` packages.
 
-Status: before 1.0. The API and the JSON report layout can still change, and the [release notes](https://github.com/zeybek/obench/releases) list every breaking change.
+Status: before 1.0. The API and the JSON report layout can still change, and the [release notes](https://github.com/zeybek/obench/releases) list every breaking change. [STABILITY.md](STABILITY.md) says what counts as the public API and how it changes, and [SUPPORT.md](SUPPORT.md) which Odin versions are supported and where to ask.
 
 ## Guide
 
