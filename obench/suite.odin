@@ -30,6 +30,7 @@ Result :: struct {
 	speedup_vs_fastest:  f64, // 1.0 = fastest in group/param cohort; larger means slower
 	speedup_vs_first:    f64, // > 1.0 means faster than the first entry in the cohort
 	speedup_significant: bool, // `speedup_vs_first` passed the same significance test as baselines
+	zero_alloc:          bool, // Checked as `@zero_alloc` (by annotation, `expect_zero_allocs`, or `--zero-alloc`)
 	zero_alloc_failed:   bool,
 	violation_loc:       runtime.Source_Code_Location,
 	violation_size:      int,
@@ -101,6 +102,7 @@ _clone_config_strings :: proc(cfg: ^Config, allocator: runtime.Allocator) {
 	cfg.md_export_path = strings.clone(cfg.md_export_path, allocator)
 	cfg.csv_export_path = strings.clone(cfg.csv_export_path, allocator)
 	cfg.spall_export_path = strings.clone(cfg.spall_export_path, allocator)
+	cfg.machine_label = strings.clone(cfg.machine_label, allocator)
 }
 
 @(private = "file")
@@ -112,6 +114,7 @@ _delete_config_strings :: proc(cfg: ^Config, allocator: runtime.Allocator) {
 	delete(cfg.md_export_path, allocator)
 	delete(cfg.csv_export_path, allocator)
 	delete(cfg.spall_export_path, allocator)
+	delete(cfg.machine_label, allocator)
 	cfg^ = {}
 }
 

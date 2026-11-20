@@ -33,7 +33,7 @@ step "list discovers the five example packages"
 [ "$(grep -c "^Package " "$WORK/list.txt")" -eq 5 ] || fail "expected 5 packages"
 
 step "run every example and merge the reports"
-"$OBENCH" examples -n 8 -w 2 --no-color \
+"$OBENCH" examples -n 8 -w 2 --no-color --machine smoke-runner \
   --save-baseline "$WORK_N/base.json" --csv "$WORK_N/all.csv" --md "$WORK_N/all.md"
 for suite in allocators_bench aos_vs_soa_bench parallel_bench sorting_bench "Slice vs Binary Search vs Map"; do
   grep -q "\"suite_name\": \"$suite\"" "$WORK/base.json" || fail "merged JSON is missing suite '$suite'"
@@ -49,6 +49,12 @@ grep -q '"latency": {' "$WORK/export.bmf" || fail "the BMF export has no latency
 grep -q '"unit": "ns"' "$WORK/export.gab" || fail "the github-action-benchmark export has no times"
 grep -q '"time_unit": "ns"' "$WORK/export.gbench" || fail "the Google Benchmark export has no times"
 [ "$(wc -l < "$WORK/export.jsonl" | tr -d ' ')" -eq 37 ] || fail "expected one JSONL line per benchmark"
+
+step "the report records the machine label and the commit"
+grep -q '"label": "smoke-runner"' "$WORK/base.json" || fail "the report has no machine label"
+if head="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null)"; then
+  grep -q "\"commit\": \"$head\"" "$WORK/base.json" || fail "the report doesn't name commit $head"
+fi
 
 step "comparing a report with itself passes the regression gate"
 "$OBENCH" compare "$WORK_N/base.json" "$WORK_N/base.json" --fail-on-regression --no-color

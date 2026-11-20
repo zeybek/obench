@@ -41,6 +41,9 @@ Config :: struct {
 	md_export_path:           string,
 	csv_export_path:          string,
 	spall_export_path:        string,
+	// A name for the test machine, written to the JSON report's `machine.label` (`--machine`,
+	// `OBENCH_MACHINE`), so history tools can tell machines apart. Default: "".
+	machine_label:            string,
 }
 
 /*
@@ -129,6 +132,9 @@ default_config :: proc() -> Config {
 	}
 	if !stdout_wants_color() {
 		cfg.color_output = false
+	}
+	if val := os.get_env("OBENCH_MACHINE", context.temp_allocator); len(val) > 0 {
+		cfg.machine_label = val
 	}
 	if val := os.get_env("OBENCH_BASELINE", context.temp_allocator); len(val) > 0 {
 		cfg.baseline_load_path = val
@@ -224,7 +230,8 @@ apply_args :: proc(cfg: ^Config, args: []string) {
 		     "json",
 		     "md",
 		     "csv",
-		     "spall":
+		     "spall",
+		     "machine":
 		case:
 			continue // Not an obench flag.
 		}
@@ -239,6 +246,8 @@ apply_args :: proc(cfg: ^Config, args: []string) {
 		switch key {
 		case "f", "filter":
 			cfg.filter = val
+		case "machine":
+			cfg.machine_label = val
 		case "n", "samples":
 			if n, ok := strconv.parse_int(val); ok && n > 0 {
 				cfg.sample_count = n

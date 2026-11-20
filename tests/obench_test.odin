@@ -1721,7 +1721,6 @@ test_samples_batch_ns_json_roundtrip_and_v4_compat :: proc(t: ^testing.T) {
 	doc, read_err := obench.read_json_report(path, context.temp_allocator)
 	testing.expect_value(t, read_err, nil)
 	testing.expect_value(t, doc.format_version, obench.REPORT_FORMAT_VERSION)
-	testing.expect_value(t, doc.format_version, 5)
 	if testing.expect_value(t, len(doc.benchmarks), 1) {
 		testing.expect(
 			t,

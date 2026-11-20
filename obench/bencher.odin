@@ -178,9 +178,15 @@ set_items :: proc "contextless" (b: ^Bencher, items_per_op: u64) {
 Records a custom metric (such as `"hit%"`, `"branches/op"`, or `"simd_lanes"`) that is
 displayed and exported next to the standard statistics. The value from the last sample is
 kept. Up to `MAX_CUSTOM_METRICS` distinct units are stored. `unit` is copied right away (up to
-`MAX_METRIC_UNIT_LEN` bytes), so it may be a temporary string.
+`MAX_METRIC_UNIT_LEN` bytes), so it may be a temporary string. `better` says whether a lower
+or a higher value is an improvement; the JSON report records it for history tools.
 */
-report_metric :: proc "contextless" (b: ^Bencher, value: f64, unit: string) {
+report_metric :: proc "contextless" (
+	b: ^Bencher,
+	value: f64,
+	unit: string,
+	better := Metric_Better.Unknown,
+) {
 	n := min(len(unit), MAX_METRIC_UNIT_LEN)
 	for n > 0 && n < len(unit) && unit[n] & 0xC0 == 0x80 {
 		n -= 1 // Don't cut a UTF-8 sequence in half.
@@ -189,6 +195,7 @@ report_metric :: proc "contextless" (b: ^Bencher, value: f64, unit: string) {
 	for i in 0 ..< b.custom_metrics_count {
 		if b.custom_metrics[i].unit == key {
 			b.custom_metrics[i].value = value
+			b.custom_metrics[i].better = better
 			return
 		}
 	}
@@ -196,8 +203,9 @@ report_metric :: proc "contextless" (b: ^Bencher, value: f64, unit: string) {
 		i := b.custom_metrics_count
 		copy(b._unit_buf[i][:], key)
 		b.custom_metrics[i] = Custom_Metric {
-			unit  = string(b._unit_buf[i][:n]),
-			value = value,
+			unit   = string(b._unit_buf[i][:n]),
+			value  = value,
+			better = better,
 		}
 		b.custom_metrics_count += 1
 	}

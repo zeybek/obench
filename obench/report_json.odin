@@ -8,6 +8,8 @@ import "core:math"
 import "core:os"
 import "core:slice"
 import "core:strings"
+import "core:sys/info"
+import "core:time"
 
 /*
 Version of the JSON report layout. Bumped whenever the layout changes. Readers accept older
@@ -17,9 +19,12 @@ Version 3 added `samples_ns` (every sample's time per operation) to each benchma
 `intercept` to each complexity fit. Version 4 added `untimed_allocs`: `false`, or missing in
 an older report, means allocations were counted in every timed sample. Version 5 added
 `samples_batch_ns` (every sample's overhead-adjusted integer batch duration in nanoseconds)
-to each benchmark.
+to each benchmark. Version 6 added where and how a report was made (`created_at`, `git`,
+`ci`, `machine`, `build`, `config`, and `clock`), and to each benchmark `peak_heap_bytes`,
+the `@zero_alloc` result, the clock overhead (`clamped_samples`, `windows_per_sample`, and
+`overhead_share`), and the `better` direction of custom metrics.
 */
-REPORT_FORMAT_VERSION :: 5
+REPORT_FORMAT_VERSION :: 6
 
 /*
 Serializable record for a single benchmark in a JSON baseline or export file.
@@ -56,6 +61,12 @@ Export_Entry :: struct {
 	custom_metrics:     []Custom_Metric `json:"custom_metrics,omitempty"`,
 	samples_ns:         []f64 `json:"samples_ns,omitempty"`,
 	samples_batch_ns:   []u64 `json:"samples_batch_ns,omitempty"`,
+	peak_heap_bytes:    i64 `json:"peak_heap_bytes"`,
+	zero_alloc:         bool `json:"zero_alloc"`, // The benchmark was checked as `@zero_alloc`.
+	zero_alloc_failed:  bool `json:"zero_alloc_failed"`,
+	clamped_samples:    int `json:"clamped_samples"`,
+	windows_per_sample: f64 `json:"windows_per_sample"`,
+	overhead_share:     f64 `json:"overhead_share"`,
 }
 
 /*
@@ -73,6 +84,67 @@ Export_Complexity :: struct {
 }
 
 /*
+The commit a report's code came from: `OBENCH_GIT_COMMIT`, `OBENCH_GIT_BRANCH`, and
+`OBENCH_GIT_DIRTY` (`1` or `true`), which the CLI sets from `git` where it runs, or else
+GitHub Actions' `GITHUB_SHA` and `GITHUB_REF_NAME`. Empty when neither is there.
+*/
+Export_Git :: struct {
+	commit: string `json:"commit"`,
+	branch: string `json:"branch"`,
+	dirty:  bool `json:"dirty"`,
+}
+
+/*
+The CI run that made a report: GitHub Actions' `GITHUB_RUN_ID` and `GITHUB_RUN_ATTEMPT`.
+*/
+Export_CI :: struct {
+	run_id:      string `json:"run_id"`,
+	run_attempt: string `json:"run_attempt"`,
+}
+
+/*
+The machine a report ran on: the CPU model and its logical core count from `core:sys/info`,
+and `label`, the name `Config.machine_label` (`--machine`, `OBENCH_MACHINE`) gives the test
+machine. The host name is never written.
+*/
+Export_Machine :: struct {
+	cpu:   string `json:"cpu"`,
+	cores: int `json:"cores"`,
+	label: string `json:"label"`,
+}
+
+/*
+Compiler settings that change timings besides `optimization`: `-microarch`, whether bounds
+checks were `on` or `off`, and the commit of the Odin compiler.
+*/
+Export_Build :: struct {
+	microarch:         string `json:"microarch"`,
+	bounds_checks:     string `json:"bounds_checks"`,
+	odin_version_hash: string `json:"odin_version_hash"`,
+}
+
+/*
+The settings a run used.
+*/
+Export_Run_Config :: struct {
+	samples:          int `json:"samples"`,
+	warmup_ms:        f64 `json:"warmup_ms"`,
+	min_sample_us:    f64 `json:"min_sample_us"`,
+	max_bench_ms:     f64 `json:"max_bench_ms"`,
+	fixed_batch_size: int `json:"fixed_batch_size"`,
+	threshold_pct:    f64 `json:"threshold_pct"`,
+}
+
+/*
+The clock calibration a run subtracted from its samples.
+*/
+Export_Clock :: struct {
+	overhead_ns:     f64 `json:"overhead_ns"`,
+	overhead_cycles: f64 `json:"overhead_cycles"`,
+	resolution_ns:   f64 `json:"resolution_ns"`,
+}
+
+/*
 Root JSON document written by `--save-baseline` and `--json`. A document produced by the
 CLI for several packages contains the benchmarks of every suite; each entry carries its
 own `suite_name`.
@@ -86,14 +158,22 @@ Export_Document :: struct {
 	os:             string `json:"os"`,
 	arch:           string `json:"arch"`,
 	untimed_allocs: bool `json:"untimed_allocs"`,
+	created_at:     string `json:"created_at"`, // UTC, RFC 3339
+	git:            Export_Git `json:"git"`,
+	ci:             Export_CI `json:"ci"`,
+	machine:        Export_Machine `json:"machine"`,
+	build:          Export_Build `json:"build"`,
+	config:         Export_Run_Config `json:"config"`,
+	clock:          Export_Clock `json:"clock"`,
 	geomean_ns:     f64 `json:"geomean_ns"`,
 	benchmarks:     []Export_Entry `json:"benchmarks"`,
 	complexities:   []Export_Complexity `json:"complexities,omitempty"`,
 }
 
 /*
-Builds an export document for `s`. Strings point into the suite; only the slices are
-allocated with `allocator`.
+Builds an export document for `s`. Most strings point into the suite; the slices and the
+strings of `created_at`, `git`, `ci`, `machine`, and `optimization` are allocated with
+`allocator`, so an arena or the temp allocator is the easy way to free it all.
 */
 @(require_results)
 export_document :: proc(
@@ -135,6 +215,12 @@ export_document :: proc(
 			custom_metrics     = r.stats.custom_metrics[:r.stats.custom_metrics_count],
 			samples_ns         = r.stats.samples_ns,
 			samples_batch_ns   = r.stats.samples_batch_ns,
+			peak_heap_bytes    = r.stats.peak_heap_bytes,
+			zero_alloc         = r.zero_alloc,
+			zero_alloc_failed  = r.zero_alloc_failed,
+			clamped_samples    = r.stats.clamped_samples,
+			windows_per_sample = r.stats.windows_per_sample,
+			overhead_share     = r.stats.overhead_share,
 		}
 	}
 
@@ -161,9 +247,87 @@ export_document :: proc(
 		os = ODIN_OS_STRING,
 		arch = ODIN_ARCH_STRING,
 		untimed_allocs = s.config.untimed_alloc_check,
+		created_at = _now_rfc3339(allocator),
+		git = _git_info(allocator),
+		ci = _ci_info(allocator),
+		machine = _machine_info(s.config.machine_label, allocator),
+		build = _current_build_info(),
+		config = Export_Run_Config {
+			samples = s.config.sample_count,
+			warmup_ms = time.duration_milliseconds(s.config.warmup_time),
+			min_sample_us = time.duration_microseconds(s.config.min_sample_time),
+			max_bench_ms = time.duration_milliseconds(s.config.max_bench_time),
+			fixed_batch_size = s.config.fixed_batch_size,
+			threshold_pct = s.config.noise_threshold_pct,
+		},
+		clock = Export_Clock {
+			overhead_ns = s.clock.overhead_ns,
+			overhead_cycles = s.clock.overhead_cycles,
+			resolution_ns = s.clock.resolution_ns,
+		},
 		geomean_ns = s.summary.geomean_ns,
 		benchmarks = entries,
 		complexities = comp_entries,
+	}
+}
+
+@(private)
+_now_rfc3339 :: proc(allocator := context.allocator) -> string {
+	stamp, _ := time.time_to_rfc3339(time.now(), 0, false, allocator)
+	return stamp
+}
+
+@(private)
+_env_flag :: proc(key: string) -> bool {
+	val := os.get_env(key, context.temp_allocator)
+	return val == "1" || val == "true"
+}
+
+@(private)
+_git_info :: proc(allocator := context.allocator) -> Export_Git {
+	commit := os.get_env("OBENCH_GIT_COMMIT", allocator)
+	if commit != "" {
+		return {
+			commit = commit,
+			branch = os.get_env("OBENCH_GIT_BRANCH", allocator),
+			dirty = _env_flag("OBENCH_GIT_DIRTY"),
+		}
+	}
+	delete(commit, allocator)
+	return {
+		commit = os.get_env("GITHUB_SHA", allocator),
+		branch = os.get_env("GITHUB_REF_NAME", allocator),
+	}
+}
+
+@(private)
+_ci_info :: proc(allocator := context.allocator) -> Export_CI {
+	return {
+		run_id = os.get_env("GITHUB_RUN_ID", allocator),
+		run_attempt = os.get_env("GITHUB_RUN_ATTEMPT", allocator),
+	}
+}
+
+@(private)
+_machine_info :: proc(label: string, allocator := context.allocator) -> Export_Machine {
+	_, logical, _ := info.cpu_core_count()
+	if logical <= 0 {
+		// `core:sys/info` reads /proc/cpuinfo fields that Linux on ARM doesn't have.
+		logical = os.get_processor_core_count()
+	}
+	return {
+		cpu = strings.clone(strings.trim_space(info.cpu_name()), allocator),
+		cores = logical,
+		label = strings.clone(label, allocator),
+	}
+}
+
+@(private)
+_current_build_info :: proc() -> Export_Build {
+	return {
+		microarch = ODIN_MICROARCH_STRING,
+		bounds_checks = "off" when ODIN_NO_BOUNDS_CHECK else "on",
+		odin_version_hash = ODIN_VERSION_HASH,
 	}
 }
 
@@ -179,9 +343,10 @@ write_json_document :: proc(
 	loc := #caller_location,
 ) -> json.Marshal_Error {
 	opt := json.Marshal_Options {
-		pretty     = true,
-		use_spaces = true,
-		spaces     = 2,
+		pretty         = true,
+		use_spaces     = true,
+		spaces         = 2,
+		use_enum_names = true,
 	}
 	// `json.marshal` rather than `json.marshal_to_writer`, which newer Odin versions keep private.
 	data := json.marshal(doc, opt, allocator, loc) or_return
@@ -275,6 +440,10 @@ _export_entry_stats :: proc(e: Export_Entry) -> Stats {
 		temp_bytes_per_op  = e.temp_bytes_per_op,
 		samples_ns         = e.samples_ns,
 		samples_batch_ns   = _valid_batch_samples(e),
+		peak_heap_bytes    = e.peak_heap_bytes,
+		clamped_samples    = e.clamped_samples,
+		windows_per_sample = e.windows_per_sample,
+		overhead_share     = e.overhead_share,
 	}
 	cm_count := min(len(e.custom_metrics), MAX_CUSTOM_METRICS)
 	st.custom_metrics_count = cm_count
@@ -324,35 +493,59 @@ load_baseline_file :: proc(
 // The build settings a report was written with that change every timing in it.
 @(private)
 _Build_Settings :: struct {
-	optimization: string,
-	os:           string,
-	arch:         string,
+	optimization:  string,
+	os:            string,
+	arch:          string,
+	microarch:     string,
+	bounds_checks: string,
 }
 
 @(private)
 _current_build :: proc() -> _Build_Settings {
-	return {fmt.tprintf("%v", ODIN_OPTIMIZATION_MODE), ODIN_OS_STRING, ODIN_ARCH_STRING}
+	b := _current_build_info()
+	return {
+		fmt.tprintf("%v", ODIN_OPTIMIZATION_MODE),
+		ODIN_OS_STRING,
+		ODIN_ARCH_STRING,
+		b.microarch,
+		b.bounds_checks,
+	}
 }
 
 @(private)
 _document_build :: proc(doc: Export_Document) -> _Build_Settings {
-	return {doc.optimization, doc.os, doc.arch}
+	return {doc.optimization, doc.os, doc.arch, doc.build.microarch, doc.build.bounds_checks}
 }
 
 // Reports whether timings from builds `a` and `b` can't be compared: their optimization mode,
-// OS, or architecture differ. A field that a report leaves empty is not held against it.
+// OS, architecture, `-microarch`, or bounds checks differ. A field that a report leaves empty,
+// as reports older than format version 6 do for the last two, is not held against it.
 @(private)
 _builds_differ :: proc(a, b: _Build_Settings) -> bool {
 	differ :: proc(x, y: string) -> bool {
 		return x != "" && y != "" && x != y
 	}
-	return differ(a.optimization, b.optimization) || differ(a.os, b.os) || differ(a.arch, b.arch)
+	return(
+		differ(a.optimization, b.optimization) ||
+		differ(a.os, b.os) ||
+		differ(a.arch, b.arch) ||
+		differ(a.microarch, b.microarch) ||
+		differ(a.bounds_checks, b.bounds_checks) \
+	)
 }
 
-// `-o:Speed darwin/arm64`, for warnings.
+// `-o:Speed darwin/arm64 -microarch:native -no-bounds-check`, for warnings.
 @(private)
 _build_string :: proc(b: _Build_Settings) -> string {
-	return fmt.tprintf("-o:%s %s/%s", b.optimization, b.os, b.arch)
+	sb := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&sb, "-o:%s %s/%s", b.optimization, b.os, b.arch)
+	if b.microarch != "" {
+		fmt.sbprintf(&sb, " -microarch:%s", b.microarch)
+	}
+	if b.bounds_checks == "off" {
+		strings.write_string(&sb, " -no-bounds-check")
+	}
+	return strings.to_string(sb)
 }
 
 /*
@@ -506,6 +699,13 @@ merge_json_reports :: proc(input_paths: []string, output_path: string) -> Report
 		os             = first.os,
 		arch           = first.arch,
 		untimed_allocs = first.untimed_allocs,
+		created_at     = first.created_at,
+		git            = first.git,
+		ci             = first.ci,
+		machine        = first.machine,
+		build          = first.build,
+		config         = first.config,
+		clock          = first.clock,
 		geomean_ns     = count > 0 ? math.exp(log_sum / f64(count)) : 0,
 		benchmarks     = entries[:],
 		complexities   = complexities[:],
