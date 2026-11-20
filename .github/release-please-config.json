@@ -8,7 +8,9 @@
 			"include-component-in-tag": false,
 			"bump-minor-pre-major": true,
 			"initial-version": "0.1.0",
-			"extra-files": ["obench/doc.odin"]
+			"extra-files": ["obench/doc.odin"],
+			"draft": true,
+			"force-tag-creation": true
 		}
 	}
 }

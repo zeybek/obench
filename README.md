@@ -26,7 +26,7 @@ Status: before 1.0. The API and the JSON report layout can still change, and the
 
 obench needs Odin `dev-2026-10` or newer. CI tests it on Linux (x86 and ARM), macOS (ARM and Intel), and Windows against the latest Odin release and the nightly build, and on Linux against `dev-2026-10` itself.
 
-1. Copy the `obench` folder of this repository into your project, for example as `libs/obench`. Each [release](https://github.com/zeybek/obench/releases) has it as `obench-<tag>-library.tar.gz` and `.zip`, together with the license.
+1. Copy the `obench` folder of this repository into your project, for example as `libs/obench`. Each [release](https://github.com/zeybek/obench/releases) has it as `obench-<tag>-library.tar.gz` and `.zip`, together with the license. Releases after 0.3.0 carry an attestation for every archive, so `gh attestation verify obench-<tag>-library.tar.gz -R zeybek/obench` checks that a download was built by this repository's release workflow.
 
 2. Create a benchmark file such as `bench/append_bench.odin`. A benchmark is a procedure named `bench_<name>` that takes a `^obench.Bencher`, and only the body of the `step` loop is timed and counted:
 
