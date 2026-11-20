@@ -41,6 +41,15 @@ done
 [ "$(grep -c '"full_name"' "$WORK/base.json")" -eq 37 ] || fail "expected 37 benchmarks in the merged JSON"
 [ "$(wc -l < "$WORK/all.csv" | tr -d ' ')" -eq 38 ] || fail "expected a header and 37 rows in the merged CSV"
 
+step "export converts the merged report for other tools"
+for format in bmf gab gbench jsonl; do
+  "$OBENCH" export --format "$format" "$WORK_N/base.json" > "$WORK/export.$format"
+done
+grep -q '"latency": {' "$WORK/export.bmf" || fail "the BMF export has no latency"
+grep -q '"unit": "ns"' "$WORK/export.gab" || fail "the github-action-benchmark export has no times"
+grep -q '"time_unit": "ns"' "$WORK/export.gbench" || fail "the Google Benchmark export has no times"
+[ "$(wc -l < "$WORK/export.jsonl" | tr -d ' ')" -eq 37 ] || fail "expected one JSONL line per benchmark"
+
 step "comparing a report with itself passes the regression gate"
 "$OBENCH" compare "$WORK_N/base.json" "$WORK_N/base.json" --fail-on-regression --no-color
 
