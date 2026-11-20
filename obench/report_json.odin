@@ -311,6 +311,10 @@ _ci_info :: proc(allocator := context.allocator) -> Export_CI {
 @(private)
 _machine_info :: proc(label: string, allocator := context.allocator) -> Export_Machine {
 	_, logical, _ := info.cpu_core_count()
+	if logical <= 0 {
+		// `core:sys/info` reads /proc/cpuinfo fields that Linux on ARM doesn't have.
+		logical = os.get_processor_core_count()
+	}
 	return {
 		cpu = strings.clone(strings.trim_space(info.cpu_name()), allocator),
 		cores = logical,
