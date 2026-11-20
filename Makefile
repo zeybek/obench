@@ -1,4 +1,4 @@
-.PHONY: all build check check-barriers docs fmt fmt-check hooks lint links reference reference-check schema-check test test-lib test-cli test-examples smoke bench bench-allocators bench-soa bench-lookup bench-sorting bench-parallel clean
+.PHONY: all build check check-barriers docs fmt fmt-check hooks lint links reference reference-check schema-check instructions-check test test-lib test-cli test-examples smoke bench bench-allocators bench-soa bench-lookup bench-sorting bench-parallel clean
 
 ODIN ?= odin
 # odinfmt from DanielGavin/ols (tools/odinfmt); see CONTRIBUTING.md.
@@ -66,6 +66,10 @@ schema-check: $(OBENCH_BIN)
 	$(OBENCH_BIN) examples/sorting -n 3 -w 1 --no-color --json $(SCHEMA_DIR)/single.json > /dev/null
 	$(OBENCH_BIN) examples -n 3 -w 1 --no-color --json $(SCHEMA_DIR)/merged.json > /dev/null
 	uvx check-jsonschema@0.39.0 --schemafile schema/obench-report-v6.json $(SCHEMA_DIR)/single.json $(SCHEMA_DIR)/merged.json
+
+# --instructions counts the same instructions on two runs (needs Valgrind, so Linux).
+instructions-check: $(OBENCH_BIN)
+	OBENCH=$(OBENCH_BIN) scripts/check_instructions.sh
 
 # Links in the documentation (needs lychee).
 links:

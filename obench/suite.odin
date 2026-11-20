@@ -96,13 +96,14 @@ suite_create :: proc(
 	cfg := config.? or_else default_config()
 	_clone_config_strings(&cfg, allocator)
 	return Suite {
-		name = strings.clone(name, allocator, loc),
-		config = cfg,
-		clock = clock_calibrate(),
-		groups = make([dynamic]^Group, allocator, loc),
-		results = make([dynamic]Result, allocator, loc),
+		name         = strings.clone(name, allocator, loc),
+		config       = cfg,
+		// Calibrating spins until the clock ticks, which would change an instruction count.
+		clock        = clock_calibrate() if cfg.count_iterations <= 0 else {},
+		groups       = make([dynamic]^Group, allocator, loc),
+		results      = make([dynamic]Result, allocator, loc),
 		complexities = make([dynamic]Complexity_Estimate, allocator, loc),
-		allocator = allocator,
+		allocator    = allocator,
 	}
 }
 

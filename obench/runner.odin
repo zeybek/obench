@@ -605,7 +605,9 @@ suite_run :: proc(s: ^Suite) -> bool {
 	context.temp_allocator = runtime.arena_allocator(&scratch)
 
 	ok := _suite_execute(s)
-	print_terminal_report(s)
+	if s.config.count_iterations <= 0 {
+		print_terminal_report(s)
+	}
 	return ok
 }
 
@@ -667,6 +669,9 @@ suite_exit_code :: proc "contextless" (s: ^Suite) -> int {
 @(private)
 _suite_execute :: proc(s: ^Suite) -> bool {
 	_clear_results(s)
+	if s.config.count_iterations > 0 {
+		return _suite_count(s)
+	}
 	s.machine_state = read_machine_state(s.allocator)
 
 	pinned: Thread_Pin
@@ -958,13 +963,16 @@ _name_pattern_make :: proc(
 		return p
 	}
 	re, err := regex.create(text, {}, allocator, context.temp_allocator)
-	if err != nil {
+	if err != nil && flag != "" {
 		fmt.eprintfln(
 			"obench: %s '%s' isn't a regular expression (%v), so it only matches as plain text",
 			flag,
 			text,
 			err,
 		)
+		return p
+	}
+	if err != nil {
 		return p
 	}
 	p.regex = re
@@ -1048,4 +1056,75 @@ _time_empty_loop :: proc(s: ^Suite, temp_arena: ^runtime.Arena) -> f64 {
 		return 0
 	}
 	return res.stats.p50_ns
+}
+
+// `Config.count_iterations`: runs every selected benchmark with one iteration, which checks
+// that it uses the `Bencher` correctly, and then with `count_iterations`, and does nothing
+// else that could make two runs do different work.
+@(private = "file")
+_suite_count :: proc(s: ^Suite) -> bool {
+	filter := _name_pattern_make(s.config.filter, "--filter", s.allocator)
+	defer _name_pattern_destroy(&filter, s.allocator)
+	skip := _name_pattern_make(s.config.skip, "--skip", s.allocator)
+	defer _name_pattern_destroy(&skip, s.allocator)
+	temp_arena := runtime.Arena {
+		backing_allocator = s.allocator,
+	}
+	defer runtime.arena_destroy(&temp_arena)
+
+	for g in s.groups {
+		param_count := max(len(g.params), 1)
+		thread_count := max(len(g.threads), 1)
+		for p_idx in 0 ..< param_count {
+			param := g.params[p_idx] if len(g.params) > 0 else 0
+			for t_idx in 0 ..< thread_count {
+				threads := g.threads[t_idx] if len(g.threads) > 0 else 1
+				for entry in g.entries {
+					name := format_full_name(
+						g.name,
+						entry.name,
+						param,
+						len(g.params) > 0,
+						threads,
+						len(g.threads) > 0,
+						context.temp_allocator,
+					)
+					if !_selected(name, &filter, &skip, s.config.exact) {
+						continue
+					}
+					info := _Run_Info {
+						entry       = entry,
+						group_name  = g.name,
+						param       = param,
+						has_param   = len(g.params) > 0,
+						threads     = threads,
+						has_threads = len(g.threads) > 0,
+						temp_arena  = &temp_arena,
+					}
+					for iterations in ([2]int{1, s.config.count_iterations}) {
+						br := _run_batch(&info, iterations, nil, nil)
+						runtime.arena_free_all(&temp_arena)
+						if br.error != .None {
+							fmt.eprintfln("obench: %s: %s", name, bench_error_message(br.error))
+							s.failed_errors += 1
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+	return suite_failure_count(s) == 0
+}
+
+/*
+Whether `cfg`'s `filter`, `skip`, and `exact` select the benchmark with the full name `name`,
+the way `suite_run` decides it.
+*/
+@(require_results)
+benchmark_selected :: proc(cfg: Config, name: string) -> bool {
+	// No flag name, so an invalid pattern isn't reported once per benchmark.
+	filter := _name_pattern_make(cfg.filter, "", context.temp_allocator)
+	skip := _name_pattern_make(cfg.skip, "", context.temp_allocator)
+	return _selected(name, &filter, &skip, cfg.exact)
 }

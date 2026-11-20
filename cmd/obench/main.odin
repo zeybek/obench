@@ -49,6 +49,7 @@ CLI_Options :: struct {
 	test_mode:                bool,
 	quiet:                    bool,
 	counters:                 bool,
+	instructions:             bool,
 	list_json:                bool,
 	opt_mode:                 string,
 	microarch:                string,
@@ -147,6 +148,10 @@ RUN OPTIONS:
   -q, --quiet                    Print only problems and the summary line
       --counters                 Linux: instructions, IPC, branch and cache misses per op,
                                  where the kernel allows perf_event_open
+      --instructions             Count instructions per op exactly under Valgrind's
+                                 Cachegrind (Linux), with --batch-size iterations (default
+                                 100) and twice that; --json, --save-baseline, --baseline,
+                                 --threshold and --fail-on-regression work on the counts
       --zero-alloc               Treat every benchmark as @zero_alloc
       --untimed-allocs           Count allocations in one untimed batch after sampling (default)
       --timed-allocs             Count allocations in every timed sample, which adds the
@@ -210,6 +215,7 @@ _Cli_Flags :: struct {
 	test:                     bool,
 	quiet:                    bool,
 	counters:                 bool,
+	instructions:             bool,
 	opt:                      string,
 	microarch:                string,
 	no_bounds_check:          bool,
@@ -440,6 +446,7 @@ parse_cli_args :: proc(
 	opts.test_mode = f.test
 	opts.quiet = f.quiet || f.q
 	opts.counters = f.counters
+	opts.instructions = f.instructions
 	opts.list_json = f.list_json
 	opts.samples = f.samples if f.samples != UNSET else 0
 	opts.warmup_ms = f.warmup if f.warmup != UNSET else -1
@@ -1819,11 +1826,37 @@ run_package :: proc(
 	outputs: Package_Outputs,
 	reported_ols: ^map[string]bool = nil,
 ) -> int {
+	exe_path, built := build_package(pkg, index, suite_name, work_dir, opts, reported_ols)
+	if !built {
+		return EXIT_FAILURE
+	}
+	run_cmd := make([dynamic]string, context.temp_allocator)
+	append(&run_cmd, exe_path)
+	append(&run_cmd, .._runtime_args(opts, outputs))
+	return worse_exit_code(0, _run_process(run_cmd[:]))
+}
+
+/*
+Builds one package's runner (or the package itself, when it has its own main) into
+`work_dir` and returns the executable's path. `ok` is false, after saying why, when the
+build failed.
+*/
+build_package :: proc(
+	pkg: Discovered_Package,
+	index: int,
+	suite_name: string,
+	work_dir: string,
+	opts: CLI_Options,
+	reported_ols: ^map[string]bool = nil,
+) -> (
+	exe_path: string,
+	ok: bool,
+) {
 	exe_name := fmt.tprintf("bench_%d", index)
 	when ODIN_OS == .Windows {
 		exe_name = fmt.tprintf("bench_%d.exe", index)
 	}
-	exe_path, _ := filepath.join({work_dir, exe_name}, context.temp_allocator)
+	exe_path, _ = filepath.join({work_dir, exe_name}, context.temp_allocator)
 
 	cmd := make([dynamic]string, context.temp_allocator)
 	append(&cmd, _odin_executable(), "build")
@@ -1844,12 +1877,12 @@ run_package :: proc(
 		)
 		if err := os.make_directory(runner_dir); err != nil {
 			fmt.eprintfln("obench: could not create '%s': %v", runner_dir, err)
-			return EXIT_FAILURE
+			return "", false
 		}
 		runner_file, _ := filepath.join({runner_dir, "main.odin"}, context.temp_allocator)
 		if err := os.write_entire_file(runner_file, source); err != nil {
 			fmt.eprintfln("obench: could not write '%s': %v", runner_file, err)
-			return EXIT_FAILURE
+			return "", false
 		}
 
 		append(&cmd, runner_dir, fmt.tprintf("-collection:%s=%s", TARGET_COLLECTION, pkg.dir_path))
@@ -1885,7 +1918,7 @@ run_package :: proc(
 	}
 
 	if _run_process(cmd[:]) != 0 {
-		return EXIT_FAILURE
+		return "", false
 	}
 	if !os.exists(exe_path) {
 		fmt.eprintfln(
@@ -1893,13 +1926,9 @@ run_package :: proc(
 			cmd[0],
 			exe_path,
 		)
-		return EXIT_FAILURE
+		return "", false
 	}
-
-	run_cmd := make([dynamic]string, context.temp_allocator)
-	append(&run_cmd, exe_path)
-	append(&run_cmd, .._runtime_args(opts, outputs))
-	return worse_exit_code(0, _run_process(run_cmd[:]))
+	return exe_path, true
 }
 
 // Path of one package's partial report inside the work directory.
@@ -2271,6 +2300,8 @@ main :: proc() {
 		} else {
 			list_packages(packages[:])
 		}
+	} else if opts.instructions {
+		code = run_instructions(packages[:], opts)
 	} else {
 		code = run_all(packages[:], opts)
 	}

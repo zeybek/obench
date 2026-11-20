@@ -148,6 +148,25 @@ jobs:
       - name: Reports match the JSON Schema in schema/
         run: make schema-check
 
+  instructions:
+    name: instruction counts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: laytan/setup-odin@8536d8fa450ec6f1bd9ddc84bbaaf16296c0051d # v2.12.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          release: latest
+
+      - name: Install Valgrind
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq valgrind
+
+      - name: Two runs of --instructions count the same
+        run: make instructions-check
+
   # Release CLIs for Linux are linked statically (scripts/build_release_cli.sh) so they run on
   # a glibc older than the runner's; Debian 11 has 2.31.
   static-cli:
