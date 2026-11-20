@@ -80,11 +80,11 @@ Export_Entry :: struct {
 	// The median of each process when the report combines several (`combine_runs`); the
 	// regression test compares these when both sides have at least two.
 	process_medians_ns: []f64 `json:"process_medians_ns,omitempty"`,
-	// Hardware counters per operation (`Stats.counters`), left out without `--counters`.
-	instructions:       f64 `json:"instructions,omitempty"`,
-	cycles:             f64 `json:"cycles,omitempty"`,
-	branch_misses:      f64 `json:"branch_misses,omitempty"`,
-	cache_misses:       f64 `json:"cache_misses,omitempty"`,
+	// Hardware counters per operation (`Stats.counters`), 0 without `--counters`.
+	instructions:       f64 `json:"instructions"`,
+	cycles:             f64 `json:"cycles"`,
+	branch_misses:      f64 `json:"branch_misses"`,
+	cache_misses:       f64 `json:"cache_misses"`,
 }
 
 /*
@@ -194,9 +194,8 @@ Export_Document :: struct {
 	config:         Export_Run_Config `json:"config"`,
 	clock:          Export_Clock `json:"clock"`,
 	geomean_ns:     f64 `json:"geomean_ns"`,
-	// How many processes the report combines (`combine_runs`, `obench --count`); left out
-	// for one.
-	processes:      int `json:"processes,omitempty"`,
+	// How many processes the report combines (`combine_runs`, `obench --count`); 0 for one.
+	processes:      int `json:"processes"`,
 	benchmarks:     []Export_Entry `json:"benchmarks"`,
 	complexities:   []Export_Complexity `json:"complexities,omitempty"`,
 }

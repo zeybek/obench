@@ -74,7 +74,7 @@
       }
     },
     "geomean_ns": { "type": "number", "minimum": 0 },
-    "processes": { "type": "integer", "minimum": 1, "description": "How many processes the report combines (obench --count); absent for one." },
+    "processes": { "type": "integer", "minimum": 0, "description": "How many processes the report combines (obench --count); 0 for one." },
     "benchmarks": { "type": "array", "items": { "$ref": "#/$defs/benchmark" } },
     "complexities": { "type": "array", "items": { "$ref": "#/$defs/complexity" } }
   },
