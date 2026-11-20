@@ -92,6 +92,8 @@ obench needs Odin `dev-2026-10` or newer. CI tests it on Linux (x86 and ARM), ma
 
     `allocs / bytes` counts allocator calls that obtain memory, so the resizes of the growing array show up next to the single allocation of the reserved one.
 
+    `--html report.html` writes the same results as one self-contained page, with a histogram of every benchmark's samples, the time-against-N chart of every `@params` group, and the baseline drawn over them when you pass `--baseline`.
+
 ## Checking benchmarks in CI
 
 Save a baseline on one branch and compare another branch against it. `--fail-on-regression` exits with status 1 when a benchmark got significantly slower:

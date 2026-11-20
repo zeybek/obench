@@ -22,7 +22,7 @@ Features:
 - Custom domain metrics (`report_metric`)
 - Statistics: percentiles, MAD, CI95, Tukey outliers, the Mann-Whitney U test, Hodges-Lehmann
   shift intervals, suite geomean
-- `core:prof/spall` traces, JSON baselines, CSV, and Markdown reports
+- `core:prof/spall` traces, JSON baselines, CSV, Markdown, and self-contained HTML reports
 
 Install
 
@@ -281,9 +281,9 @@ with one iteration, with the protocol, `@zero_alloc`, and allocation checks, but
 nothing, so it can't read or save a baseline; it is a quick check for a CI job. `-q` prints
 only the problems and the summary line.
 
-When the CLI runs several packages, `--json`, `--save-baseline`, `--csv`, and `--md` write one
-merged file, with the suite name on every entry. `--spall` writes one trace per package
-(`trace.spall` becomes `trace.sorting_bench.spall` and so on). Each package is its own suite,
+When the CLI runs several packages, `--json`, `--save-baseline`, `--csv`, `--md`, and
+`--html` write one merged file, with the suite name on every entry. `--spall` writes one
+trace per package (`trace.spall` becomes `trace.sorting_bench.spall` and so on). Each package is its own suite,
 named after the package, and compares only with the entries of its own suite in a baseline.
 When two directories hold packages with the same name, their suites also carry the directory
 relative to the path given to the CLI, as in `bench (net/http)`, so compare runs started
@@ -312,6 +312,7 @@ pick up these environment variables. Command-line flags of the same name overrid
 	OBENCH_BASELINE                  Baseline to compare against
 	OBENCH_SAVE_BASELINE             Where to save one
 	OBENCH_JSON, OBENCH_MD           Report paths
+	OBENCH_HTML                      Same as --html
 	OBENCH_CSV                       Report path
 	OBENCH_SPALL                     Trace path
 	OBENCH_MACHINE                   Same as --machine
