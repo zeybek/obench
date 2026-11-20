@@ -180,6 +180,7 @@ _execute_entry :: proc(
 	baseline_map: map[string]Stats,
 	spall_rec: ^Spall_Recorder,
 	temp_arena: ^runtime.Arena,
+	counters: ^Counter_Group = nil,
 ) -> Result {
 	cfg := s.config
 	full_name := format_full_name(
@@ -355,6 +356,14 @@ _execute_entry :: proc(
 		}
 	}
 
+	// Hardware counters count the calling thread only, so the threads of a parallel benchmark
+	// would go unseen.
+	counting := counters != nil && counters.open && !(has_threads && thread_val > 1)
+	counter_samples: [4][dynamic]f64
+	for &c in counter_samples {
+		c = make([dynamic]f64, 0, 16, context.temp_allocator)
+	}
+
 	arg_buf: [48]u8
 	batch_arg := fmt.bprintf(arg_buf[:], "batch=%d", batch_size)
 	clamped_samples := 0
@@ -366,8 +375,23 @@ _execute_entry :: proc(
 			intrinsics.atomic_store_explicit(&heap_counter.current_bytes, 0, .Relaxed)
 		}
 		spall_begin(spall_rec, "sample", batch_arg)
+		before, after: Counter_Values
+		read_before, read_after: bool
+		if counting {
+			before, read_before = counter_group_read(counters)
+		}
 		br := _run_batch(&info, batch_size, sample_heap_counter, sample_temp_counter)
+		if counting {
+			after, read_after = counter_group_read(counters)
+		}
 		spall_end(spall_rec)
+		if read_before && read_after {
+			per_op := f64(max(batch_size, 1))
+			append(&counter_samples[0], (after.instructions - before.instructions) / per_op)
+			append(&counter_samples[1], (after.cycles - before.cycles) / per_op)
+			append(&counter_samples[2], (after.branch_misses - before.branch_misses) / per_op)
+			append(&counter_samples[3], (after.cache_misses - before.cache_misses) / per_op)
+		}
 
 		_store_batch_custom_metrics(&last_custom, &last_custom_count, &br, s.allocator)
 		if cfg.reset_temp_per_iter {
@@ -442,6 +466,19 @@ _execute_entry :: proc(
 	)
 	st.samples_ns = slice.clone(ns_samples[:], s.allocator)
 	st.samples_batch_ns = slice.clone(batch_samples[:], s.allocator)
+	if len(counter_samples[0]) > 0 {
+		median :: proc(values: []f64) -> f64 {
+			slice.sort(values)
+			return percentile_sorted(values, 0.5)
+		}
+		st.counters = Counter_Values {
+			instructions  = median(counter_samples[0][:]),
+			cycles        = median(counter_samples[1][:]),
+			branch_misses = median(counter_samples[2][:]),
+			cache_misses  = median(counter_samples[3][:]),
+		}
+		st.has_counters = true
+	}
 	if n := len(ns_samples); n > 0 {
 		st.clamped_samples = clamped_samples
 		st.windows_per_sample = windows_sum / f64(n)
@@ -731,6 +768,17 @@ _suite_execute :: proc(s: ^Suite) -> bool {
 		}
 	}
 
+	counter_group: Counter_Group
+	if s.config.counters {
+		ok: bool
+		why: string
+		counter_group, ok, why = counter_group_open()
+		if !ok {
+			s.counters_unavailable = strings.clone(why, s.allocator)
+		}
+	}
+	defer counter_group_close(&counter_group)
+
 	filter := _name_pattern_make(s.config.filter, "--filter", s.allocator)
 	defer _name_pattern_destroy(&filter, s.allocator)
 	skip := _name_pattern_make(s.config.skip, "--skip", s.allocator)
@@ -797,6 +845,7 @@ _suite_execute :: proc(s: ^Suite) -> bool {
 						baseline_map,
 						&spall_rec,
 						&temp_arena,
+						&counter_group,
 					)
 					append(&s.results, res)
 				}

@@ -57,6 +57,10 @@ Config :: struct {
 	// A name for the test machine, written to the JSON report's `machine.label` (`--machine`,
 	// `OBENCH_MACHINE`), so history tools can tell machines apart. Default: "".
 	machine_label:            string,
+	// Reads Linux hardware counters (instructions, cycles, branch and cache misses) around
+	// every sample (`--counters`), where the kernel allows it; see `counter_group_open`.
+	// Default: false.
+	counters:                 bool,
 	// Pins the thread that runs the benchmarks to this logical CPU for the run (`--pin`), on
 	// Linux and Windows; macOS can't. Default: nil, no pinning.
 	pin_cpu:                  Maybe(int),
@@ -179,6 +183,9 @@ default_config :: proc() -> Config {
 	if val := os.get_env("OBENCH_MACHINE", context.temp_allocator); len(val) > 0 {
 		cfg.machine_label = val
 	}
+	if val := os.get_env("OBENCH_COUNTERS", context.temp_allocator); val == "1" || val == "true" {
+		cfg.counters = true
+	}
 	if val := os.get_env("OBENCH_PIN", context.temp_allocator); len(val) > 0 {
 		if n, ok := strconv.parse_int(val); ok && n >= 0 {
 			cfg.pin_cpu = n
@@ -217,7 +224,8 @@ default_config :: proc() -> Config {
 Applies obench command-line flags (`--filter`, `--skip`, `--exact`, `--samples`, `--warmup`,
 `--max-time`, `--min-sample-time`, `--batch-size`, `--threshold`, `--baseline`,
 `--match-baseline-suite`, `--save-baseline`, `--json`, `--md`, `--csv`, `--spall`, `--pin`,
-`--zero-alloc`, `--untimed-allocs`, `--timed-allocs`, `--fail-on-regression`, `--test`, `-q`,
+`--zero-alloc`, `--untimed-allocs`, `--timed-allocs`, `--fail-on-regression`, `--test`,
+`--counters`, `-q`,
 `--no-color`, `--no-histogram`) to `cfg`.
 
 Values may be given as `--flag value`, `--flag=value`, or `-flag:value`. Unknown arguments
@@ -259,6 +267,9 @@ apply_args :: proc(cfg: ^Config, args: []string) {
 			continue
 		case "--test", "-test":
 			cfg.test_mode = true
+			continue
+		case "--counters", "-counters":
+			cfg.counters = true
 			continue
 		case "-q", "--quiet", "-quiet":
 			cfg.quiet = true

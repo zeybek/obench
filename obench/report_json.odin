@@ -77,6 +77,11 @@ Export_Entry :: struct {
 	effective_samples:  f64 `json:"effective_samples"`,
 	trend_pct:          f64 `json:"trend_pct"`,
 	modes:              int `json:"modes"`,
+	// Hardware counters per operation (`Stats.counters`), left out without `--counters`.
+	instructions:       f64 `json:"instructions,omitempty"`,
+	cycles:             f64 `json:"cycles,omitempty"`,
+	branch_misses:      f64 `json:"branch_misses,omitempty"`,
+	cache_misses:       f64 `json:"cache_misses,omitempty"`,
 }
 
 /*
@@ -245,6 +250,10 @@ export_document :: proc(
 			effective_samples  = r.stats.effective_samples,
 			trend_pct          = r.stats.trend_pct,
 			modes              = r.stats.modes,
+			instructions       = r.stats.counters.instructions,
+			cycles             = r.stats.counters.cycles,
+			branch_misses      = r.stats.counters.branch_misses,
+			cache_misses       = r.stats.counters.cache_misses,
 		}
 	}
 

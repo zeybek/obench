@@ -282,6 +282,18 @@ _alloc_cell :: proc(st: Stats) -> string {
 	)
 }
 
+// A count per operation: `12.3`, `4.56k`, or `7.89M`.
+@(private = "file")
+_format_count :: proc(v: f64) -> string {
+	switch {
+	case v >= 1e6:
+		return fmt.tprintf("%.2fM", v / 1e6)
+	case v >= 1e3:
+		return fmt.tprintf("%.2fk", v / 1e3)
+	}
+	return fmt.tprintf("%.1f", v)
+}
+
 @(private = "file")
 _notes_cell :: proc(s: ^Suite, r: Result, p: _Palette) -> string {
 	sb := strings.builder_make(context.temp_allocator)
@@ -430,6 +442,15 @@ write_terminal_report :: proc(w: io.Writer, s: ^Suite) {
 		)
 	}
 
+	if s.config.counters && s.counters_unavailable != "" {
+		fmt.wprintf(
+			w,
+			"%snote:%s --counters: no hardware counters here (%s)\n",
+			p.dim,
+			p.reset,
+			s.counters_unavailable,
+		)
+	}
 	if s.config.test_mode {
 		fmt.wprintf(
 			w,
@@ -456,30 +477,40 @@ write_terminal_report :: proc(w: io.Writer, s: ^Suite) {
 	tbl := _report_table_init(&rt)
 	defer _report_table_destroy(&rt)
 
-	// Cells are set one at a time: `set_cell_value*` reads its `any` argument during the
-	// call, so no `any` outlives the value it points to.
-	if show_cycles {
-		table.header(
-			tbl,
-			"benchmark",
-			"fastest",
-			"median(p50)",
-			"p99",
-			"cycles",
-			"allocs / bytes",
-			"distribution & notes",
-		)
-	} else {
-		table.header(
-			tbl,
-			"benchmark",
-			"fastest",
-			"median(p50)",
-			"p99",
-			"allocs / bytes",
-			"distribution & notes",
-		)
+	show_counters := false
+	for r in s.results {
+		show_counters ||= r.stats.has_counters
 	}
+
+	// Cells are set one at a time: `set_cell_value*` reads its `any` argument during the
+	// call, so no `any` outlives the value it points to. The header's `any`s point into
+	// `names`, which lives until the end of this procedure.
+	names: [12]string
+	name_count := 0
+	add_name :: proc(names: ^[12]string, count: ^int, name: string) {
+		names[count^] = name
+		count^ += 1
+	}
+	add_name(&names, &name_count, "benchmark")
+	add_name(&names, &name_count, "fastest")
+	add_name(&names, &name_count, "median(p50)")
+	add_name(&names, &name_count, "p99")
+	if show_cycles {
+		add_name(&names, &name_count, "cycles")
+	}
+	if show_counters {
+		add_name(&names, &name_count, "instructions")
+		add_name(&names, &name_count, "IPC")
+		add_name(&names, &name_count, "branch misses")
+		add_name(&names, &name_count, "cache misses")
+	}
+	add_name(&names, &name_count, "allocs / bytes")
+	add_name(&names, &name_count, "distribution & notes")
+	header_values: [12]any
+	for i in 0 ..< name_count {
+		header_values[i] = names[i]
+	}
+	table.header(tbl, ..header_values[:name_count])
 	notes_col := tbl.nr_cols - 1
 	for col in 1 ..< notes_col {
 		table.set_cell_alignment(tbl, table.header_row(tbl), col, .Right)
@@ -523,6 +554,18 @@ write_terminal_report :: proc(w: io.Writer, s: ^Suite) {
 		if show_cycles {
 			_set_cell(tbl, row, col, format_cycles(r.stats.median_cycles))
 			col += 1
+		}
+		if show_counters {
+			c := r.stats.counters
+			if r.stats.has_counters {
+				_set_cell(tbl, row, col, _format_count(c.instructions))
+				if c.cycles > 0 {
+					_set_cell(tbl, row, col + 1, fmt.tprintf("%.2f", c.instructions / c.cycles))
+				}
+				_set_cell(tbl, row, col + 2, _format_count(c.branch_misses))
+				_set_cell(tbl, row, col + 3, _format_count(c.cache_misses))
+			}
+			col += 4
 		}
 		_set_cell(tbl, row, col, _alloc_cell(r.stats))
 		_set_cell(tbl, row, notes_col, _notes_cell(s, r, p), .Left)

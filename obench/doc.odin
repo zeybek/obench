@@ -212,6 +212,17 @@ nothing until it allocates. `--timed-allocs` (or `OBENCH_UNTIMED_ALLOCS=0`) coun
 timed sample instead, and then benchmarks that allocate also pay for the counting: in
 `examples/allocators` on an M2, `heap` took 14% longer and `temp_allocator` 19% longer.
 
+On Linux, `--counters` reads the CPU's hardware counters around every sample with
+`perf_event_open` and adds per-operation columns for instructions, instructions per cycle,
+and branch and cache misses (`Stats.counters`, and `instructions`, `cycles`,
+`branch_misses`, and `cache_misses` in the JSON). Instructions barely move between runs, and
+the misses often explain why something got slower. The counters cover the whole batch,
+including the untimed work between `pause` and `resume`, and only the thread that runs the
+benchmark, so a parallel benchmark gets none. Where the kernel doesn't allow them
+(`perf_event_paranoid` above 2, a container's seccomp filter, or a VM without a PMU) the
+header says why and the run goes on without them. `counter_group_open` is the same thing for
+your own code.
+
 On x86 there is also a `cycles` column with time-stamp counter ticks, which run at the CPU's
 nominal frequency. On other architectures `read_cycle_counter` reads a fixed-frequency timer
 (24 MHz on Apple Silicon), so the column is hidden there.
@@ -337,6 +348,7 @@ pick up these environment variables. Command-line flags of the same name overrid
 	OBENCH_SPALL                     Trace path
 	OBENCH_MACHINE                   Same as --machine
 	OBENCH_PIN                       Same as --pin
+	OBENCH_COUNTERS                  1 or true: same as --counters
 	OBENCH_GIT_COMMIT, _BRANCH, _DIRTY  The commit for the report (set by the CLI)
 	OBENCH_NO_COLOR, NO_COLOR        Disable colors
 	FORCE_COLOR                      Keep colors when the output isn't a terminal

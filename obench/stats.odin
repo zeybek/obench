@@ -57,6 +57,9 @@ Stats :: struct {
 	// Peaks in the distribution of the samples (`count_modes`); 2 or more means the samples
 	// fall into separate groups.
 	modes:                int,
+	// Hardware counters per operation with `Config.counters`, when `has_counters` is set.
+	counters:             Counter_Values,
+	has_counters:         bool,
 	p25_ns:               f64,
 	p50_ns:               f64, // Median
 	p75_ns:               f64,

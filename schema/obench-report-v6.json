@@ -122,7 +122,11 @@
         "autocorrelation": { "type": "number", "minimum": -1, "maximum": 1 },
         "effective_samples": { "type": "number", "minimum": 0 },
         "trend_pct": { "type": "number" },
-        "modes": { "type": "integer", "minimum": 0 }
+        "modes": { "type": "integer", "minimum": 0 },
+        "instructions": { "type": "number", "minimum": 0 },
+        "cycles": { "type": "number", "minimum": 0 },
+        "branch_misses": { "type": "number", "minimum": 0 },
+        "cache_misses": { "type": "number", "minimum": 0 }
       }
     },
     "custom_metric": {
