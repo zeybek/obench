@@ -42,8 +42,21 @@ Stats :: struct {
 	max_ns:               f64,
 	mean_ns:              f64,
 	std_dev_ns:           f64,
-	ci95_ns:              f64, // Half-width of the mean's 95% confidence interval (Student's t * SE)
+	// Half-width of the mean's 95% confidence interval: Student's t times the standard error,
+	// both over `effective_samples` rather than `samples`.
+	ci95_ns:              f64,
 	cv_pct:               f64,
+	// Lag-1 autocorrelation of the samples in the order they were taken, and how many
+	// independent samples they are worth (`effective_sample_count`).
+	autocorrelation:      f64,
+	effective_samples:    f64,
+	// The change over the run when the samples drift (see `sample_trend`): the Theil-Sen
+	// change in percent when Mann-Kendall's |z| is above 2.576 and the change is at least
+	// `TREND_MIN_PCT`, else 0.
+	trend_pct:            f64,
+	// Peaks in the distribution of the samples (`count_modes`); 2 or more means the samples
+	// fall into separate groups.
+	modes:                int,
 	p25_ns:               f64,
 	p50_ns:               f64, // Median
 	p75_ns:               f64,
@@ -146,12 +159,16 @@ Suite_Summary :: struct {
 	unchanged:         int,
 }
 
+// Smallest drift over a run, in percent, that `compute_stats` reports as a trend.
+TREND_MIN_PCT :: 5.0
+
 /*
 Computes full parametric and non-parametric statistics from sample slices.
 `ns_per_op` and `cycles_per_op` contain one entry per sample (already divided by `batch_size`).
 When `alloc_iters` is non-zero, per-op allocation rates divide by `alloc_iters` instead of
 `total_iters`. The returned `samples_ns` refers to `ns_per_op`, so clone it if the stats
-outlive the slice.
+outlive the slice. `ns_per_op` has to be in the order the samples were taken, for
+`autocorrelation`, `effective_samples`, and `trend_pct`.
 */
 @(require_results)
 compute_stats :: proc(
@@ -203,10 +220,19 @@ compute_stats :: proc(
 	}
 	std_dev_ns: f64 = 0
 	ci95_ns: f64 = 0
+	// Samples taken one after another aren't independent (one slow stretch of the machine
+	// covers several), so the interval uses the number of samples they are worth.
+	autocorrelation := lag1_autocorrelation(ns_per_op)
+	effective := effective_sample_count(n, autocorrelation)
 	if n > 1 {
 		std_dev_ns = math.sqrt(var_sum / f64(n - 1))
-		ci95_ns = t_critical_975(f64(n - 1)) * (std_dev_ns / math.sqrt(f64(n)))
+		ci95_ns = t_critical_975(effective - 1) * (std_dev_ns / math.sqrt(effective))
 	}
+	trend_pct, trend_z := sample_trend(ns_per_op, allocator)
+	if abs(trend_z) <= 2.576 || abs(trend_pct) < TREND_MIN_PCT {
+		trend_pct = 0
+	}
+	modes := count_modes(ns_per_op, allocator)
 	cv_pct: f64 = 0
 	if mean_ns > 0 {
 		cv_pct = (std_dev_ns / mean_ns) * 100.0
@@ -335,6 +361,10 @@ compute_stats :: proc(
 		std_dev_ns         = std_dev_ns,
 		ci95_ns            = ci95_ns,
 		cv_pct             = cv_pct,
+		autocorrelation    = autocorrelation,
+		effective_samples  = effective,
+		trend_pct          = trend_pct,
+		modes              = modes,
 		p25_ns             = p25_ns,
 		p50_ns             = p50_ns,
 		p75_ns             = p75_ns,

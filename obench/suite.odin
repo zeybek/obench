@@ -70,6 +70,12 @@ Suite :: struct {
 	// optimization mode, OS, or architecture, counting allocations the other way, or holding
 	// none of the suite's benchmarks. See `suite_exit_code`.
 	failed_baseline:          int,
+	// The machine's state when the suite last ran (see `read_machine_state`).
+	machine_state:            Machine_State,
+	// Time per iteration of an empty `for step(b) {}` loop, timed after the benchmarks. A
+	// result near it most likely had its work optimized away. 0 when nothing ran or with
+	// `Config.test_mode`.
+	empty_loop_ns:            f64,
 	allocator:                runtime.Allocator,
 }
 
@@ -128,15 +134,21 @@ _delete_config_strings :: proc(cfg: ^Config, allocator: runtime.Allocator) {
 	cfg^ = {}
 }
 
+// Frees what a `Result` owns.
+@(private)
+_destroy_result :: proc(s: ^Suite, r: ^Result) {
+	delete(r.full_name, s.allocator)
+	delete(r.stats.samples_ns, s.allocator)
+	delete(r.stats.samples_batch_ns, s.allocator)
+	for i in 0 ..< r.stats.custom_metrics_count {
+		delete(r.stats.custom_metrics[i].unit, s.allocator)
+	}
+}
+
 @(private)
 _clear_results :: proc(s: ^Suite) {
 	for &r in s.results {
-		delete(r.full_name, s.allocator)
-		delete(r.stats.samples_ns, s.allocator)
-		delete(r.stats.samples_batch_ns, s.allocator)
-		for i in 0 ..< r.stats.custom_metrics_count {
-			delete(r.stats.custom_metrics[i].unit, s.allocator)
-		}
+		_destroy_result(s, &r)
 	}
 	clear(&s.results)
 	clear(&s.complexities)
@@ -147,6 +159,8 @@ _clear_results :: proc(s: ^Suite) {
 	s.failed_errors = 0
 	s.failed_io = 0
 	s.failed_baseline = 0
+	machine_state_destroy(&s.machine_state, s.allocator)
+	s.empty_loop_ns = 0
 }
 
 /*

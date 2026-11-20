@@ -73,6 +73,10 @@ Export_Entry :: struct {
 	clamped_samples:    int `json:"clamped_samples"`,
 	windows_per_sample: f64 `json:"windows_per_sample"`,
 	overhead_share:     f64 `json:"overhead_share"`,
+	autocorrelation:    f64 `json:"autocorrelation"`, // See `Stats` for these four.
+	effective_samples:  f64 `json:"effective_samples"`,
+	trend_pct:          f64 `json:"trend_pct"`,
+	modes:              int `json:"modes"`,
 }
 
 /*
@@ -110,13 +114,20 @@ Export_CI :: struct {
 
 /*
 The machine a report ran on: the CPU model and its logical core count from `core:sys/info`,
-and `label`, the name `Config.machine_label` (`--machine`, `OBENCH_MACHINE`) gives the test
-machine. The host name is never written.
+`label`, the name `Config.machine_label` (`--machine`, `OBENCH_MACHINE`) gives the test
+machine, and its state during the run (see `Machine_State`), empty where the OS doesn't
+say. The host name is never written.
 */
 Export_Machine :: struct {
-	cpu:   string `json:"cpu"`,
-	cores: int `json:"cores"`,
-	label: string `json:"label"`,
+	cpu:        string `json:"cpu"`,
+	cores:      int `json:"cores"`,
+	label:      string `json:"label"`,
+	governor:   string `json:"governor"`,
+	boost:      string `json:"boost"`,
+	smt:        string `json:"smt"`,
+	load_avg:   f64 `json:"load_avg"`,
+	on_battery: bool `json:"on_battery"`,
+	vm:         bool `json:"vm"`,
 }
 
 /*
@@ -142,12 +153,14 @@ Export_Run_Config :: struct {
 }
 
 /*
-The clock calibration a run subtracted from its samples.
+The clock calibration a run subtracted from its samples, and the time per iteration of an
+empty `step` loop (`Suite.empty_loop_ns`).
 */
 Export_Clock :: struct {
 	overhead_ns:     f64 `json:"overhead_ns"`,
 	overhead_cycles: f64 `json:"overhead_cycles"`,
 	resolution_ns:   f64 `json:"resolution_ns"`,
+	empty_loop_ns:   f64 `json:"empty_loop_ns"`,
 }
 
 /*
@@ -228,6 +241,10 @@ export_document :: proc(
 			clamped_samples    = r.stats.clamped_samples,
 			windows_per_sample = r.stats.windows_per_sample,
 			overhead_share     = r.stats.overhead_share,
+			autocorrelation    = r.stats.autocorrelation,
+			effective_samples  = r.stats.effective_samples,
+			trend_pct          = r.stats.trend_pct,
+			modes              = r.stats.modes,
 		}
 	}
 
@@ -258,7 +275,7 @@ export_document :: proc(
 		created_at = _now_rfc3339(allocator),
 		git = _git_info(allocator),
 		ci = _ci_info(allocator),
-		machine = _machine_info(s.config.machine_label, allocator),
+		machine = _machine_info(s.config.machine_label, s.machine_state, allocator),
 		build = _current_build_info(),
 		config = Export_Run_Config {
 			samples = s.config.sample_count,
@@ -272,6 +289,7 @@ export_document :: proc(
 			overhead_ns = s.clock.overhead_ns,
 			overhead_cycles = s.clock.overhead_cycles,
 			resolution_ns = s.clock.resolution_ns,
+			empty_loop_ns = s.empty_loop_ns,
 		},
 		geomean_ns = s.summary.geomean_ns,
 		benchmarks = entries,
@@ -317,17 +335,38 @@ _ci_info :: proc(allocator := context.allocator) -> Export_CI {
 }
 
 @(private)
-_machine_info :: proc(label: string, allocator := context.allocator) -> Export_Machine {
+_machine_info :: proc(
+	label: string,
+	state: Machine_State,
+	allocator := context.allocator,
+) -> Export_Machine {
+	return {
+		cpu = strings.clone(_cpu_model(), allocator),
+		cores = _logical_cores(),
+		label = strings.clone(label, allocator),
+		governor = strings.clone(state.governor, allocator),
+		boost = strings.clone(state.boost, allocator),
+		smt = strings.clone(state.smt, allocator),
+		load_avg = state.load_avg,
+		on_battery = state.on_battery,
+		vm = state.vm,
+	}
+}
+
+// The CPU model as `core:sys/info` names it.
+@(private)
+_cpu_model :: proc() -> string {
+	return strings.trim_space(info.cpu_name())
+}
+
+@(private)
+_logical_cores :: proc() -> int {
 	_, logical, _ := info.cpu_core_count()
 	if logical <= 0 {
 		// `core:sys/info` reads /proc/cpuinfo fields that Linux on ARM doesn't have.
 		logical = os.get_processor_core_count()
 	}
-	return {
-		cpu = strings.clone(strings.trim_space(info.cpu_name()), allocator),
-		cores = logical,
-		label = strings.clone(label, allocator),
-	}
+	return logical
 }
 
 @(private)

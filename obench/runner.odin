@@ -630,6 +630,18 @@ suite_exit_code :: proc "contextless" (s: ^Suite) -> int {
 @(private)
 _suite_execute :: proc(s: ^Suite) -> bool {
 	_clear_results(s)
+	s.machine_state = read_machine_state(s.allocator)
+
+	pinned: Thread_Pin
+	if cpu, pin := s.config.pin_cpu.?; pin {
+		ok: bool
+		why: string
+		pinned, ok, why = pin_thread(cpu)
+		if !ok {
+			fmt.eprintfln("obench: warning: not pinned to CPU %d: %s", cpu, why)
+		}
+	}
+	defer unpin_thread(pinned)
 
 	baseline_map := make(map[string]Stats, allocator = s.allocator)
 	defer destroy_baseline_map(&baseline_map, s.allocator)
@@ -659,6 +671,24 @@ _suite_execute :: proc(s: ^Suite) -> bool {
 				s.config.match_baseline_suite,
 			)
 			baseline_loaded = true
+
+			// Times from another CPU model, or another machine, aren't this machine's times.
+			if base_cpu, cpu := doc.machine.cpu, _cpu_model(); base_cpu != "" && base_cpu != cpu {
+				fmt.eprintfln(
+					"obench: warning: baseline '%s' was measured on %s and this run on %s",
+					s.config.baseline_load_path,
+					base_cpu,
+					cpu if cpu != "" else "an unknown CPU",
+				)
+			} else if base_label, label := doc.machine.label, s.config.machine_label;
+			   base_label != "" && label != "" && base_label != label {
+				fmt.eprintfln(
+					"obench: warning: baseline '%s' comes from machine '%s' and this run from '%s'",
+					s.config.baseline_load_path,
+					base_label,
+					label,
+				)
+			}
 
 			// A baseline from another -o mode or platform turns every delta into noise, and one
 			// from an unoptimized build hides real regressions behind fake speedups.
@@ -828,6 +858,10 @@ _suite_execute :: proc(s: ^Suite) -> bool {
 		}
 	}
 
+	if len(s.results) > 0 && !s.config.test_mode {
+		s.empty_loop_ns = _time_empty_loop(s, &temp_arena)
+	}
+
 	s.summary = compute_suite_summary(s.results[:])
 
 	// A filter that matches nothing here (a typo, or a benchmark of another suite) must not
@@ -928,4 +962,41 @@ _selected :: proc(name: string, filter, skip: ^_Name_Pattern, exact: string) -> 
 		return false
 	}
 	return true
+}
+
+@(private = "file")
+_empty_step :: proc(b: ^Bencher) {
+	for step(b) {
+	}
+}
+
+// Times an empty `step` loop with the suite's settings, at most 20 samples, and returns its
+// median time per iteration, or 0 if it failed.
+@(private = "file")
+_time_empty_loop :: proc(s: ^Suite, temp_arena: ^runtime.Arena) -> f64 {
+	saved := s.config
+	defer s.config = saved
+	s.config.sample_count = min(s.config.sample_count, 20)
+	s.config.warmup_time = min(s.config.warmup_time, 10 * time.Millisecond)
+	s.config.enforce_zero_allocs = false
+
+	no_baseline: map[string]Stats
+	no_trace: Spall_Recorder
+	res := _execute_entry(
+		s,
+		"",
+		Entry{name = "empty loop", procedure = _empty_step},
+		0,
+		false,
+		1,
+		false,
+		no_baseline,
+		&no_trace,
+		temp_arena,
+	)
+	defer _destroy_result(s, &res)
+	if res.error != .None {
+		return 0
+	}
+	return res.stats.p50_ns
 }

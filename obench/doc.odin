@@ -183,6 +183,26 @@ so the times shown are too low, and `[overhead-dominated]` means the overhead wa
 10% of the raw time. Both usually come from calling `pause`/`resume` around work that is
 smaller than the clock itself: time a bigger piece of work, or move the setup out of the loop.
 
+After the benchmarks, obench times an empty `for obench.step(b) {}` loop and shows it in the
+header (`empty loop 700.5 ps` on an M2). `[near empty loop]` marks a single-threaded benchmark
+whose median is within 1.2 times of it: the compiler most likely removed the work, so pass
+its input and result through `black_box`. Samples taken one after another aren't
+independent, since one slow stretch of the machine covers several of them, so `ci95_ns`
+counts only the samples they are worth (`effective_samples`, from the lag-1
+`autocorrelation`). `[drifts +8%]` means the times moved steadily over the run, by that much
+from the first sample to the last (see `sample_trend`), and `[2 modes]` that the samples fell
+into separate groups (see `count_modes`); both usually mean the machine changed speed while
+it ran. The JSON report has all four for every benchmark, and the empty loop as
+`clock.empty_loop_ns`.
+
+The header also warns about a machine that makes timings less steady: a CPU governor other
+than `performance`, battery power, or a load average of half the cores or more, on Linux, and
+the load on macOS. It notes turbo clocks and a virtual machine, and the JSON report records
+all of it in `machine`. A baseline measured on another CPU model, or under another
+`--machine` label, gets a warning too. `--pin <cpu>` runs the benchmarks on one logical CPU
+on Linux and Windows, so the scheduler doesn't move them between cores; threads that
+`run_parallel` starts share that CPU on Linux.
+
 `allocs / bytes` counts allocator calls that obtain memory, which includes resizes: building
 a 64-item dynamic array from capacity 16 shows `3.0 / 512 B` (one allocation, two resizes).
 Temp-only allocations show as `0 (tmp 3.0/512 B)`. The counts come from one more batch
@@ -316,6 +336,7 @@ pick up these environment variables. Command-line flags of the same name overrid
 	OBENCH_CSV                       Report path
 	OBENCH_SPALL                     Trace path
 	OBENCH_MACHINE                   Same as --machine
+	OBENCH_PIN                       Same as --pin
 	OBENCH_GIT_COMMIT, _BRANCH, _DIRTY  The commit for the report (set by the CLI)
 	OBENCH_NO_COLOR, NO_COLOR        Disable colors
 	FORCE_COLOR                      Keep colors when the output isn't a terminal

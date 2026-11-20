@@ -65,6 +65,7 @@ CLI_Options :: struct {
 	html_path:                string,
 	spall_path:               string,
 	machine:                  string,
+	pin_cpu:                  int, // -1 when --pin isn't given
 	threshold_pct:            f64,
 	zero_alloc:               bool,
 	untimed_allocs:           bool,
@@ -166,6 +167,7 @@ RUN OPTIONS:
                                  time-against-N charts, and the baseline drawn over them
       --spall <file>             Write a core:prof/spall trace (one file per package)
       --machine <label>          Name the test machine in the JSON report (machine.label)
+      --pin <cpu>                Run the benchmarks on this logical CPU (Linux, Windows)
       --no-color                 Disable ANSI colors. They are also off when NO_COLOR is set
                                  or the output isn't a terminal (FORCE_COLOR=1 keeps them)
       --no-histogram             Hide distribution sparklines
@@ -221,6 +223,7 @@ _Cli_Flags :: struct {
 	html:                     string,
 	spall:                    string,
 	machine:                  string,
+	pin:                      int,
 	format:                   string,
 	zero_alloc:               bool,
 	untimed_allocs:           bool,
@@ -256,6 +259,7 @@ parse_cli_args :: proc(
 		target_path   = ".",
 		opt_mode      = "speed",
 		warmup_ms     = -1,
+		pin_cpu       = -1,
 		threshold_pct = 2.0,
 	}
 
@@ -294,6 +298,7 @@ parse_cli_args :: proc(
 		warmup     = UNSET,
 		w          = UNSET,
 		batch_size = UNSET,
+		pin        = UNSET,
 		threshold  = 2.0,
 	}
 	// `list --json` prints the list as JSON; elsewhere `--json` takes a file name.
@@ -362,6 +367,8 @@ parse_cli_args :: proc(
 		return opts, "--warmup expects a non-negative integer (milliseconds)"
 	case f.threshold <= 0:
 		return opts, "--threshold expects a positive number"
+	case f.pin != UNSET && f.pin < 0:
+		return opts, "--pin expects a CPU number, 0 or more"
 	case f.untimed_allocs && f.timed_allocs:
 		return opts, "--untimed-allocs and --timed-allocs can't be used together"
 	case f.batch_size != UNSET && f.batch_size <= 0:
@@ -443,6 +450,7 @@ parse_cli_args :: proc(
 	opts.html_path = f.html
 	opts.spall_path = f.spall
 	opts.machine = f.machine
+	opts.pin_cpu = f.pin if f.pin != UNSET else -1
 	opts.zero_alloc = f.zero_alloc
 	opts.untimed_allocs = f.untimed_allocs
 	opts.timed_allocs = f.timed_allocs
@@ -1563,6 +1571,9 @@ _runtime_args :: proc(
 	}
 	if opts.machine != "" {
 		append(&args, "--machine", opts.machine)
+	}
+	if opts.pin_cpu >= 0 {
+		append(&args, "--pin", fmt.aprintf("%d", opts.pin_cpu, allocator = allocator))
 	}
 	if opts.load_baseline != "" {
 		append(&args, "--baseline", opts.load_baseline)
