@@ -106,6 +106,8 @@ A change counts as a regression when the Mann-Whitney U test on the samples of b
 
 A baseline whose times can't be compared fails the gate too: one built with another `-o` mode, OS, or architecture, and one that counted allocations the other way while it has a benchmark that allocates. obench counts allocations in an untimed batch after the timed samples, and reports older than format version 4 counted them in every timed sample, which made the benchmarks that allocate slower. Save such a baseline again, or run with `--timed-allocs` until you do.
 
+`obench export --format bmf|gab|gbench|jsonl <report.json>` converts a report for [Bencher](https://bencher.dev/), [github-action-benchmark](https://github.com/benchmark-action/github-action-benchmark) (`customSmallerIsBetter`), tools that read Google Benchmark's JSON, or a JSONL history file with one line per benchmark.
+
 Allocation counts are exact, so `--fail-on-alloc-regression` makes a gate that holds even on a noisy runner: it fails when a benchmark allocates more per operation, heap or temp, count or bytes, than in the baseline.
 
 Benchmarks can also run inside `odin test`: `run_test` runs a suite from a `@(test)` procedure and fails the test on a misused benchmark, a failed `@zero_alloc` check, or a regression.

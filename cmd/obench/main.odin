@@ -24,6 +24,7 @@ EXIT_USAGE :: 2
 Subcommand :: enum {
 	Run,
 	Compare,
+	Export,
 	List,
 	Version,
 	Help,
@@ -34,6 +35,8 @@ CLI_Options :: struct {
 	target_path:              string,
 	compare_old:              string,
 	compare_new:              string,
+	export_format:            Export_Format,
+	export_path:              string,
 	filter:                   string,
 	samples:                  int,
 	warmup_ms:                int,
@@ -94,6 +97,10 @@ USAGE:
   obench [run] [dir] [options]          Discover and run benchmarks under dir (default: .)
   obench list [dir]                     List discovered benchmarks without running them
   obench compare <old.json> <new.json>  Compare two JSON reports in benchstat style
+  obench export --format <format> <report.json>
+                                        Convert a JSON report for other tools: bmf (Bencher),
+                                        gab (github-action-benchmark), gbench (Google
+                                        Benchmark), or jsonl (one line per benchmark)
   obench version | help
 
 DISCOVERY:
@@ -178,6 +185,7 @@ _Cli_Flags :: struct {
 	md:                       string,
 	csv:                      string,
 	spall:                    string,
+	format:                   string,
 	zero_alloc:               bool,
 	untimed_allocs:           bool,
 	timed_allocs:             bool,
@@ -220,6 +228,8 @@ parse_cli_args :: proc(
 			opts.subcommand = .Run
 		case "compare", "diff":
 			opts.subcommand = .Compare
+		case "export":
+			opts.subcommand = .Export
 		case "list":
 			opts.subcommand = .List
 		case "version":
@@ -230,6 +240,7 @@ parse_cli_args :: proc(
 		if args[0] == "run" ||
 		   args[0] == "compare" ||
 		   args[0] == "diff" ||
+		   args[0] == "export" ||
 		   args[0] == "list" ||
 		   args[0] == "version" ||
 		   args[0] == "help" {
@@ -369,6 +380,17 @@ parse_cli_args :: proc(
 		}
 		opts.compare_old = positionals[0]
 		opts.compare_new = positionals[1]
+	case .Export:
+		format, ok := parse_export_format(f.format)
+		if !ok {
+			return opts,
+				"export expects --format bmf, gab, gbench or jsonl: obench export --format bmf <report.json>"
+		}
+		if len(positionals) != 1 {
+			return opts, "export expects one JSON report: obench export --format bmf <report.json>"
+		}
+		opts.export_format = format
+		opts.export_path = positionals[0]
 	case .Run, .List:
 		if len(positionals) > 1 {
 			return opts, fmt.tprintf("expected at most one directory, got %d", len(positionals))
@@ -2032,6 +2054,20 @@ main :: proc() {
 		if !passed {
 			os.exit(EXIT_FAILURE)
 		}
+		return
+
+	case .Export:
+		doc, err := obench.read_json_report(opts.export_path, context.temp_allocator)
+		if err != nil {
+			fmt.eprintfln("obench export: could not read '%s' (%v)", opts.export_path, err)
+			os.exit(EXIT_FAILURE)
+		}
+		sb := strings.builder_make(context.temp_allocator)
+		if write_export(strings.to_writer(&sb), doc, opts.export_format) != nil {
+			fmt.eprintfln("obench export: could not write the %v output", opts.export_format)
+			os.exit(EXIT_FAILURE)
+		}
+		_, _ = os.write_string(os.stdout, strings.to_string(sb))
 		return
 
 	case .List, .Run:
