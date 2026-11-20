@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zeybek.github.io/obench/schema/obench-report-v6.json",
+  "title": "obench JSON report, format version 6",
+  "description": "Written by --json and --save-baseline. New fields may be added within a format version, and readers must ignore fields they don't know, so objects allow additional properties. See STABILITY.md.",
+  "type": "object",
+  "required": ["format_version", "benchmarks"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "format_version": { "type": "integer", "const": 6 },
+    "obench_version": { "type": "string" },
+    "odin_version": { "type": "string" },
+    "optimization": { "type": "string" },
+    "suite_name": { "type": "string" },
+    "os": { "type": "string" },
+    "arch": { "type": "string" },
+    "untimed_allocs": { "type": "boolean" },
+    "created_at": { "type": "string", "description": "UTC, RFC 3339" },
+    "git": {
+      "type": "object",
+      "properties": {
+        "commit": { "type": "string" },
+        "branch": { "type": "string" },
+        "dirty": { "type": "boolean" }
+      }
+    },
+    "ci": {
+      "type": "object",
+      "properties": {
+        "run_id": { "type": "string" },
+        "run_attempt": { "type": "string" }
+      }
+    },
+    "machine": {
+      "type": "object",
+      "properties": {
+        "cpu": { "type": "string" },
+        "cores": { "type": "integer", "minimum": 0 },
+        "label": { "type": "string" }
+      }
+    },
+    "build": {
+      "type": "object",
+      "properties": {
+        "microarch": { "type": "string" },
+        "bounds_checks": { "enum": ["on", "off", ""] },
+        "odin_version_hash": { "type": "string" }
+      }
+    },
+    "config": {
+      "type": "object",
+      "properties": {
+        "samples": { "type": "integer", "minimum": 0 },
+        "warmup_ms": { "type": "number", "minimum": 0 },
+        "min_sample_us": { "type": "number", "minimum": 0 },
+        "max_bench_ms": { "type": "number", "minimum": 0 },
+        "fixed_batch_size": { "type": "integer", "minimum": 0 },
+        "threshold_pct": { "type": "number", "minimum": 0 }
+      }
+    },
+    "clock": {
+      "type": "object",
+      "properties": {
+        "overhead_ns": { "type": "number", "minimum": 0 },
+        "overhead_cycles": { "type": "number", "minimum": 0 },
+        "resolution_ns": { "type": "number", "minimum": 0 }
+      }
+    },
+    "geomean_ns": { "type": "number", "minimum": 0 },
+    "benchmarks": { "type": "array", "items": { "$ref": "#/$defs/benchmark" } },
+    "complexities": { "type": "array", "items": { "$ref": "#/$defs/complexity" } }
+  },
+  "$defs": {
+    "benchmark": {
+      "type": "object",
+      "required": ["suite_name", "full_name"],
+      "properties": {
+        "suite_name": { "type": "string" },
+        "full_name": { "type": "string" },
+        "group_name": { "type": "string" },
+        "name": { "type": "string" },
+        "param": { "type": "integer" },
+        "has_param": { "type": "boolean" },
+        "threads": { "type": "integer", "minimum": 0 },
+        "has_threads": { "type": "boolean" },
+        "error": { "type": "string", "description": "Set when the benchmark failed; its numbers are then zero." },
+        "samples": { "type": "integer", "minimum": 0 },
+        "batch_size": { "type": "integer", "minimum": 0 },
+        "min_ns": { "type": "number", "minimum": 0 },
+        "p50_ns": { "type": "number", "minimum": 0 },
+        "p95_ns": { "type": "number", "minimum": 0 },
+        "p99_ns": { "type": "number", "minimum": 0 },
+        "max_ns": { "type": "number", "minimum": 0 },
+        "mean_ns": { "type": "number", "minimum": 0 },
+        "std_dev_ns": { "type": "number", "minimum": 0 },
+        "ci95_ns": { "type": "number", "minimum": 0 },
+        "mad_ns": { "type": "number", "minimum": 0 },
+        "median_cycles": { "type": "number", "minimum": 0 },
+        "mb_per_sec": { "type": "number", "minimum": 0 },
+        "items_per_sec": { "type": "number", "minimum": 0 },
+        "allocs_per_op": { "type": "number", "minimum": 0 },
+        "resizes_per_op": { "type": "number", "minimum": 0 },
+        "alloc_bytes_per_op": { "type": "number", "minimum": 0 },
+        "temp_allocs_per_op": { "type": "number", "minimum": 0 },
+        "temp_bytes_per_op": { "type": "number", "minimum": 0 },
+        "custom_metrics": { "type": "array", "items": { "$ref": "#/$defs/custom_metric" } },
+        "samples_ns": { "type": "array", "items": { "type": "number", "minimum": 0 } },
+        "samples_batch_ns": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+        "peak_heap_bytes": { "type": "integer", "minimum": 0 },
+        "zero_alloc": { "type": "boolean" },
+        "zero_alloc_failed": { "type": "boolean" },
+        "clamped_samples": { "type": "integer", "minimum": 0 },
+        "windows_per_sample": { "type": "number", "minimum": 0 },
+        "overhead_share": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "custom_metric": {
+      "type": "object",
+      "required": ["unit", "value"],
+      "properties": {
+        "unit": { "type": "string" },
+        "value": { "type": "number" },
+        "better": { "enum": ["Lower_Is_Better", "Higher_Is_Better", "Unknown"] }
+      }
+    },
+    "complexity": {
+      "type": "object",
+      "properties": {
+        "suite_name": { "type": "string" },
+        "group_name": { "type": "string" },
+        "bench_name": { "type": "string" },
+        "complexity": { "type": "string" },
+        "coefficient": { "type": "number" },
+        "intercept": { "type": "number" },
+        "r_squared": { "type": "number" },
+        "nrmse": { "type": "number" }
+      }
+    }
+  }
+}

@@ -31,6 +31,10 @@ perl -pi -e '
   s/Browse API documentation for the Odin base, core, and vendor library collections\./Allocation-aware micro-benchmarking for Odin./g;
 ' "${pages[@]}"
 
+# The JSON Schema of every report format version, at /obench/schema/.
+mkdir -p schema
+cp ../../schema/*.json schema/
+
 # Every page but the 404 and the documentation report gets a canonical link and a sitemap entry.
 lastmod="$(date -u +%Y-%m-%d)"
 {
