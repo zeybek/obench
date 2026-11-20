@@ -57,6 +57,9 @@ Stats :: struct {
 	// Peaks in the distribution of the samples (`count_modes`); 2 or more means the samples
 	// fall into separate groups.
 	modes:                int,
+	// The median of every process, for a result read from a report that combines several
+	// (`Export_Entry.process_medians_ns`); nil for a run of one process.
+	process_medians_ns:   []f64,
 	// Hardware counters per operation with `Config.counters`, when `has_counters` is set.
 	counters:             Counter_Values,
 	has_counters:         bool,
@@ -650,6 +653,9 @@ on the means finds a difference at the 5% level and the median moved by at least
 threshold.
 
 The rank statistics sort copies of the samples with `allocator`.
+
+When both sides combine at least two processes (`process_medians_ns`, from `combine_runs`),
+the process medians take the place of the samples in both tests.
 */
 @(require_results)
 compare_baseline :: proc(
@@ -691,15 +697,21 @@ compare_baseline :: proc(
 		baseline.std_dev_ns,
 		baseline.samples,
 	)
-	rank_test := len(current.samples_ns) >= 2 && len(baseline.samples_ns) >= 2
+	// Two processes running the same code differ by more than the samples inside one, so
+	// when both sides come from several processes, the processes are what is compared.
+	cur_samples, base_samples := current.samples_ns, baseline.samples_ns
+	if len(current.process_medians_ns) >= 2 && len(baseline.process_medians_ns) >= 2 {
+		cur_samples, base_samples = current.process_medians_ns, baseline.process_medians_ns
+	}
+	rank_test := len(cur_samples) >= 2 && len(base_samples) >= 2
 	p_value: f64 = 1
 	shift, shift_low, shift_high: f64
 	regression, improvement: bool
 	if rank_test {
-		_, _, p_value = mann_whitney_u(current.samples_ns, baseline.samples_ns, allocator)
+		_, _, p_value = mann_whitney_u(cur_samples, base_samples, allocator)
 		shift, shift_low, shift_high, _ = hodges_lehmann_shift(
-			current.samples_ns,
-			baseline.samples_ns,
+			cur_samples,
+			base_samples,
 			allocator = allocator,
 		)
 		regression = shift_low > noise_threshold_pct

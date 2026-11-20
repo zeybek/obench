@@ -268,6 +268,25 @@ sed 's/"cpu": "[^"]*"/"cpu": "Another CPU"/' "$WORK/cpu_a.json" > "$WORK/cpu_b.j
 "$OBENCH" examples/sorting -n 5 -w 2 --no-color --baseline "$WORK_N/cpu_b.json" >/dev/null 2> "$WORK/cpu_err.txt"
 grep -q "was measured on Another CPU" "$WORK/cpu_err.txt" || fail "expected a warning about the baseline's CPU"
 
+step "--count runs a package in several processes and combines their reports"
+"$OBENCH" examples/sorting --count 3 -n 5 -w 2 --no-color --json "$WORK_N/count.json" > "$WORK/count.txt"
+grep -q "sorting_bench over 3 processes" "$WORK/count.txt" || fail "expected the combined table of 3 processes"
+grep -q '"processes": 3' "$WORK/count.json" || fail "expected processes in the combined report"
+grep -q '"process_medians_ns"' "$WORK/count.json" || fail "expected the process medians in the report"
+set +e
+"$OBENCH" examples/sorting --count 3 -n 5 -w 2 --no-color --baseline "$WORK_N/count.json" \
+  --fail-on-regression > "$WORK/count_cmp.txt"; code=$?
+set -e
+[ "$code" -le 1 ] || fail "expected --count against its own baseline to compare, got exit $code"
+grep -q "matched" "$WORK/count_cmp.txt" || fail "expected --count to compare with the baseline"
+"$OBENCH" "$WORK_N/regress" --collection "libs=$ROOT_N" --define WORK=1000 -n 10 -w 5 --no-color \
+  --count 3 --json "$WORK_N/fast3.json" >/dev/null
+set +e
+"$OBENCH" "$WORK_N/regress" --collection "libs=$ROOT_N" --define WORK=10000 -n 10 -w 5 --no-color \
+  --count 3 --baseline "$WORK_N/fast3.json" --fail-on-regression >/dev/null; code=$?
+set -e
+[ "$code" -eq 1 ] || fail "expected --count to catch a 10x slowdown, got exit $code"
+
 step "nothing was written into the source tree"
 AFTER="$(snapshot)"
 [ "$BEFORE" = "$AFTER" ] || fail "files under examples/ changed: $(diff <(echo "$BEFORE") <(echo "$AFTER") || true)"

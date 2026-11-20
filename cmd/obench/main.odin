@@ -50,6 +50,7 @@ CLI_Options :: struct {
 	quiet:                    bool,
 	counters:                 bool,
 	instructions:             bool,
+	count:                    int, // Processes per package (`--count`), 1 by default
 	list_json:                bool,
 	opt_mode:                 string,
 	microarch:                string,
@@ -148,6 +149,8 @@ RUN OPTIONS:
   -q, --quiet                    Print only problems and the summary line
       --counters                 Linux: instructions, IPC, branch and cache misses per op,
                                  where the kernel allows perf_event_open
+      --count <processes>        Run every package in this many processes and compare their
+                                 medians (default: 1); see "Repeating runs" in the docs
       --instructions             Count instructions per op exactly under Valgrind's
                                  Cachegrind (Linux), with --batch-size iterations (default
                                  100) and twice that; --json, --save-baseline, --baseline,
@@ -216,6 +219,7 @@ _Cli_Flags :: struct {
 	quiet:                    bool,
 	counters:                 bool,
 	instructions:             bool,
+	count:                    int,
 	opt:                      string,
 	microarch:                string,
 	no_bounds_check:          bool,
@@ -309,6 +313,7 @@ parse_cli_args :: proc(
 		w          = UNSET,
 		batch_size = UNSET,
 		pin        = UNSET,
+		count      = UNSET,
 		threshold  = 2.0,
 	}
 	// `list --json` prints the list as JSON; elsewhere `--json` takes a file name.
@@ -379,6 +384,14 @@ parse_cli_args :: proc(
 		return opts, "--threshold expects a positive number"
 	case f.pin != UNSET && f.pin < 0:
 		return opts, "--pin expects a CPU number, 0 or more"
+	case f.count != UNSET && f.count < 1:
+		return opts, "--count expects a positive number of processes"
+	case f.count > 1 && (f.md != "" || f.csv != "" || f.spall != ""):
+		return opts,
+			"--count combines the JSON reports of its processes, so it writes --json, --save-baseline and --html but not --md, --csv or --spall"
+	case f.count > 1 && (f.test || f.instructions):
+		return opts,
+			"--count repeats a measured run, so it can't be used with --test or --instructions"
 	case f.untimed_allocs && f.timed_allocs:
 		return opts, "--untimed-allocs and --timed-allocs can't be used together"
 	case f.batch_size != UNSET && f.batch_size <= 0:
@@ -447,6 +460,7 @@ parse_cli_args :: proc(
 	opts.quiet = f.quiet || f.q
 	opts.counters = f.counters
 	opts.instructions = f.instructions
+	opts.count = f.count if f.count != UNSET else 1
 	opts.list_json = f.list_json
 	opts.samples = f.samples if f.samples != UNSET else 0
 	opts.warmup_ms = f.warmup if f.warmup != UNSET else -1
@@ -1627,7 +1641,7 @@ _odin_executable :: proc() -> string {
 
 // Runs `cmd` with the CLI's standard streams and returns its exit status, or `EXIT_FAILURE`
 // when it couldn't be started or didn't exit normally.
-@(private = "file")
+@(private)
 _run_process :: proc(cmd: []string) -> int {
 	child, start_err := os.process_start(
 		os.Process_Desc{command = cmd, stdout = os.stdout, stderr = os.stderr, stdin = os.stdin},
@@ -2112,10 +2126,17 @@ run_all :: proc(packages: []Discovered_Package, opts: CLI_Options) -> int {
 			continue
 		}
 
-		code = worse_exit_code(
-			code,
-			run_package(pkg, idx, names[idx], work_dir, opts, outputs, &reported_ols),
-		)
+		if opts.count > 1 {
+			code = worse_exit_code(
+				code,
+				run_package_repeated(pkg, idx, names[idx], work_dir, opts, outputs, &reported_ols),
+			)
+		} else {
+			code = worse_exit_code(
+				code,
+				run_package(pkg, idx, names[idx], work_dir, opts, outputs, &reported_ols),
+			)
+		}
 		if multi {
 			if outputs.json != "" && os.exists(outputs.json) {
 				append(&json_parts, outputs.json)

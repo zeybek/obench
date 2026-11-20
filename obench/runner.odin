@@ -4,7 +4,9 @@ import "base:intrinsics"
 import "base:runtime"
 import "core:fmt"
 import "core:math"
+import "core:os"
 import "core:slice"
+import "core:strconv"
 import "core:strings"
 import "core:text/regex"
 import "core:time"
@@ -583,6 +585,10 @@ suite_execute :: proc(s: ^Suite) -> bool {
 	defer runtime.arena_destroy(&scratch)
 	context.temp_allocator = runtime.arena_allocator(&scratch)
 
+	if pad := _stack_offset(); pad > 0 {
+		shift := intrinsics.alloca(pad, 16)
+		_ = black_box(shift)
+	}
 	return _suite_execute(s)
 }
 
@@ -604,6 +610,10 @@ suite_run :: proc(s: ^Suite) -> bool {
 	defer runtime.arena_destroy(&scratch)
 	context.temp_allocator = runtime.arena_allocator(&scratch)
 
+	if pad := _stack_offset(); pad > 0 {
+		shift := intrinsics.alloca(pad, 16)
+		_ = black_box(shift)
+	}
 	ok := _suite_execute(s)
 	if s.config.count_iterations <= 0 {
 		print_terminal_report(s)
@@ -1127,4 +1137,16 @@ benchmark_selected :: proc(cfg: Config, name: string) -> bool {
 	filter := _name_pattern_make(cfg.filter, "", context.temp_allocator)
 	skip := _name_pattern_make(cfg.skip, "", context.temp_allocator)
 	return _selected(name, &filter, &skip, cfg.exact)
+}
+
+/*
+Bytes to move the stack down before the benchmarks run, from `OBENCH_STACK_OFFSET` (at most
+64 KiB). `obench --count` gives every process a random one, so the processes don't all share
+one stack layout, which can make one of them faster or slower for reasons unrelated to the
+code (Mytkowicz et al., "Producing Wrong Data Without Doing Anything Obviously Wrong!").
+*/
+@(private = "file")
+_stack_offset :: proc() -> int {
+	n, ok := strconv.parse_int(os.get_env("OBENCH_STACK_OFFSET", context.temp_allocator))
+	return clamp(n, 0, 64 << 10) if ok else 0
 }
