@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      nightly:
+        description: Also test against Odin's nightly build
+        type: boolean
+        default: true
   schedule:
     # Every night, also against Odin's nightly build, to catch breaking changes in core early.
     - cron: "0 3 * * *"
@@ -30,8 +35,9 @@ jobs:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel, windows-latest]
         # Pushes and pull requests test against the latest Odin release, which is what the
         # release workflow waits for. The nightly and manual runs add Odin's nightly build, so a
-        # change in Odin's core shows up there without blocking a release.
-        odin: ${{ fromJSON((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["latest", "nightly"]' || '["latest"]') }}
+        # change in Odin's core shows up there without blocking a release. The release workflow
+        # starts this one on the release PR with `nightly` off.
+        odin: ${{ fromJSON((github.event_name == 'schedule' || inputs.nightly) && '["latest", "nightly"]' || '["latest"]') }}
         exclude:
           # Odin publishes no nightly build for Intel macOS.
           - os: macos-15-intel

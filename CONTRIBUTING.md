@@ -77,4 +77,4 @@ The CLIs are built by `scripts/build_release_cli.sh`, which links the Linux ones
 - `APPLE_SIGNING_IDENTITY`: its name, like `Developer ID Application: Name (TEAMID)`
 - `APPLE_ID`, `APPLE_TEAM_ID` and `APPLE_APP_PASSWORD`: the Apple ID, team, and an app-specific password for `notarytool`
 
-The release PR is opened with the default `GITHUB_TOKEN`, and GitHub holds the CI runs on it until a maintainer approves them on the pull request (they show as "action required"). To have CI start on release PRs without that step, add a personal access token as a repository secret and pass it to the action as `token`.
+The release PR is opened with the default `GITHUB_TOKEN`, and GitHub holds the `pull_request` runs on it until a maintainer approves them on the pull request (they show as "action required"). The release workflow doesn't wait for that: whenever it opens or updates the PR, it starts CI, Lint and Links on the PR's branch with `workflow_dispatch`, and their checks show on the PR. CI leaves out Odin's nightly build there. The held runs don't need approving.
