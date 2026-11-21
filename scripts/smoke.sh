@@ -310,6 +310,13 @@ set +e
 set -e
 [ "$code" -eq 3 ] || fail "expected a gate on 2 processes a side to exit 3, got exit $code"
 grep -q "too few for 95%" "$WORK/count2_cmp.txt" || fail "expected the undecided rows to say why"
+"$OBENCH" examples/sorting -n 5 -w 2 --no-color --baseline "$WORK_N/count.json" \
+  --json "$WORK_N/single.json" > /dev/null 2> "$WORK/one_side.err"
+grep -q "combines several processes" "$WORK/one_side.err" ||
+  fail "expected a warning for one process against a --count baseline"
+"$OBENCH" compare "$WORK_N/single.json" "$WORK_N/count.json" --no-color > "$WORK/one_side_cmp.txt"
+grep -q "only one side comes from several processes" "$WORK/one_side_cmp.txt" ||
+  fail "expected compare to warn when only one side has several processes"
 
 step "compare combines several reports per side, and ab alternates two trees"
 "$OBENCH" compare "$WORK_N/count.json" "$WORK_N/count.json" -- "$WORK_N/count.json" --no-color \

@@ -728,6 +728,18 @@ _suite_execute :: proc(s: ^Suite) -> bool {
 			)
 			baseline_loaded = true
 
+			// A run is one process. Against a baseline that combines several, the comparison
+			// can't use process medians and falls back to the samples.
+			for _, st in baseline_map {
+				if len(st.process_medians_ns) >= 2 {
+					fmt.eprintfln(
+						"obench: warning: baseline '%s' combines several processes and this run is one, so they are compared on their samples, which flag unchanged code more often: run with --count as well",
+						s.config.baseline_load_path,
+					)
+					break
+				}
+			}
+
 			// Times from another CPU model, or another machine, aren't this machine's times.
 			if base_cpu, cpu := doc.machine.cpu, _cpu_model(); base_cpu != "" && base_cpu != cpu {
 				fmt.eprintfln(

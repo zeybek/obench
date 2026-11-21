@@ -16,7 +16,7 @@ obench --count 5 --save-baseline main.json
 obench --count 5 --baseline main.json --fail-on-regression
 ```
 
-`--count 5` runs every package in five processes, each with a different memory layout, and keeps the median of each process. When both the baseline and the run come from at least two processes, the gate compares those medians, so it only fails on a change that holds across processes. Use at least 4 processes on both sides. With fewer, a comparison can be left without a 95% interval, and then it decides nothing. The same four runs of `examples/lookup` with `--count 5` flagged none of the 144 comparisons. It takes five times as long. `--count` writes `--json`, `--save-baseline`, and `--html`, but not `--md`, `--csv`, or `--spall`.
+`--count 5` runs every package in five processes, each with a different memory layout, and keeps the median of each process. When both the baseline and the run come from at least two processes, the gate compares those medians, so it only fails on a change that holds across processes. Use at least 4 processes on both sides. With fewer, a comparison can be left without a 95% interval, and then it decides nothing. When only one side comes from several processes, like a baseline saved before the job got `--count`, obench warns and compares the samples as before, so save the baseline again with `--count`. The same four runs of `examples/lookup` with `--count 5` flagged none of the 144 comparisons. It takes five times as long. `--count` writes `--json`, `--save-baseline`, and `--html`, but not `--md`, `--csv`, or `--spall`.
 
 ## Run both sides on the same machine
 
