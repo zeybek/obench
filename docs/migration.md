@@ -1,10 +1,8 @@
 # Migration notes
 
-Every release with a breaking change gets a section here: what changed, how it shows, and what to do. The [release notes](https://github.com/zeybek/obench/releases) list all changes, and [STABILITY.md](../STABILITY.md) says what counts as breaking.
+Every release with a breaking change gets a section here: what changed, how it shows, and what to do. A section can be there before its release is out, and then it lists what has changed on `main` so far. The [release notes](https://github.com/zeybek/obench/releases) list all changes, and [STABILITY.md](../STABILITY.md) says what counts as breaking.
 
 ## 0.3 to 0.4
-
-0.4 isn't released yet. These are the breaking changes on `main` since 0.3.0.
 
 ### A regression needs its whole interval above the threshold
 

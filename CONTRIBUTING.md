@@ -9,14 +9,16 @@ You need Odin `dev-2026-10` or newer, `make`, and `bash`. The repository is laid
 | Path | What it is |
 | :--- | :--- |
 | `obench/` | The library package, the only folder users copy into their projects |
-| `cmd/obench/` | The CLI, with its tests in `main_test.odin` |
+| `cmd/obench/` | The CLI, with its tests in the `*_test.odin` files next to it |
 | `tests/` | Library tests, plus `barrier_probe/` for `scripts/check_barriers.sh` and, in `testdata/`, the numpy and scipy values the statistics are checked against |
 | `examples/` | Example benchmarks. All but `core_style` are found and run by the CLI |
+| `docs/` | The guides: a tutorial, how-to guides, explanations, and the migration notes |
+| `schema/` | The JSON Schema of the report, one file per format version |
 | `scripts/` | End-to-end checks of the CLI (`smoke.sh`), the checks the git hooks run, the documentation build (`build_docs.sh` with `odin-doc.json`), and the generator of the scipy reference data (`scipy_reference.py`) |
 
-`obench/` is one Odin package with a file per topic. `config.odin`, `bencher.odin`, and `suite.odin` hold what users call; `runner.odin` holds the measuring loop behind `suite_run`. Each report format has its own `report_*.odin`, and the rest (`stats`, `complexity`, `clock`, `allocator`, `batch`, `parallel`, `black_box`, `spall`, `testing`) are named after what they do. Subfolders would be separate packages in Odin, which is why there are none.
+`obench/` is one Odin package with a file per topic. `config.odin`, `bencher.odin`, and `suite.odin` hold what users call; `runner.odin` holds the measuring loop behind `suite_run`. Each report format has its own `report_*.odin`, and the rest (`stats`, `shift`, `sample_shape`, `complexity`, `clock`, `counters`, `machine_state`, `allocator`, `batch`, `parallel`, `black_box`, `spall`, `testing`) are named after what they do. Subfolders would be separate packages in Odin, which is why there are none.
 
-The user documentation lives in two places: the README, and the package documentation in `obench/doc.odin`, which `make docs` renders into `build/docs` with the generator behind pkg.odin-lang.org.
+The user documentation lives in three places: the README, the guides in `docs/`, and the package documentation in `obench/doc.odin`, which `make docs` renders into `build/docs` with the generator behind pkg.odin-lang.org.
 
 Optional tools the repository is set up for:
 
