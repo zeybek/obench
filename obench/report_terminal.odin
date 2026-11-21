@@ -326,7 +326,7 @@ _notes_cell :: proc(s: ^Suite, r: Result, p: _Palette) -> string {
 		}
 	}
 
-	if r.diff.has_baseline && r.diff.allocs_grew {
+	if r.diff.allocs_grew {
 		color := p.red if s.config.fail_on_alloc_regression else p.yellow
 		fmt.sbprintf(&sb, "%s[allocs grew]%s ", color, p.reset)
 	}

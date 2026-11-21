@@ -198,3 +198,52 @@ test_compare_leaves_too_few_processes_undecided :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(strings.to_string(js), `"too_few_samples": true`))
 	testing.expect(t, strings.contains(strings.to_string(js), `"verdict": "unchanged"`))
 }
+
+// A report from one process against one that combines five: there are no process medians to
+// compare on one side, so the samples are compared and the output says so.
+@(test)
+test_compare_warns_when_only_one_side_has_several_processes :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	entry :: proc(samples: []f64, medians: []f64) -> []obench.Export_Entry {
+		entries := make([]obench.Export_Entry, 1, context.temp_allocator)
+		entries[0] = {
+			suite_name         = "s",
+			full_name          = "work",
+			samples            = len(samples),
+			p50_ns             = samples[len(samples) / 2],
+			mean_ns            = samples[len(samples) / 2],
+			samples_ns         = slice.clone(samples, context.temp_allocator),
+			process_medians_ns = slice.clone(medians, context.temp_allocator),
+		}
+		return entries
+	}
+	samples := []f64{100, 101, 99, 102, 98, 100.5, 99.5, 101.5, 98.5, 100}
+	medians := []f64{99.5, 100, 100.5, 101, 100.2}
+	single := obench.Export_Document {
+		format_version = obench.REPORT_FORMAT_VERSION,
+		untimed_allocs = true,
+		benchmarks     = entry(samples, nil),
+	}
+	several := single
+	several.processes = 5
+	several.benchmarks = entry(samples, medians)
+
+	sb := strings.builder_make(context.temp_allocator)
+	summary := obench.write_comparison(strings.to_writer(&sb), single, several, 2.0, false)
+	testing.expect_value(t, summary.one_sided_processes, 1)
+	out := strings.to_string(sb)
+	testing.expect(t, strings.contains(out, "only one side comes from several processes"), out)
+
+	md := strings.builder_make(context.temp_allocator)
+	_ = obench.write_comparison_markdown(strings.to_writer(&md), several, single, 2.0)
+	testing.expect(
+		t,
+		strings.contains(strings.to_string(md), "Only one side comes from several processes"),
+	)
+
+	// Both sides from several processes compare their medians, with nothing to warn about.
+	_, both := obench.compare_documents(several, several)
+	testing.expect_value(t, both.one_sided_processes, 0)
+	_, neither := obench.compare_documents(single, single)
+	testing.expect_value(t, neither.one_sided_processes, 0)
+}

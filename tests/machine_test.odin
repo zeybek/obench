@@ -123,6 +123,37 @@ test_empty_loop_is_calibrated_whatever_the_batch_size :: proc(t: ^testing.T) {
 	)
 }
 
+// The floor is the faster of two loops, an empty one and one with a `black_box` in it. Which
+// one is faster depends on the CPU, so this checks that both were timed: with a shortest
+// sample of 10 ms, each loop needs its calibration probes, 5 samples and the batch that counts
+// allocations, which is more than 80 ms. One loop alone takes about 105 ms.
+@(test)
+test_empty_loop_times_two_loops :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	cfg := obench.Config {
+		warmup_time         = 0,
+		min_sample_time     = 10 * time.Millisecond,
+		max_bench_time      = 50 * time.Millisecond,
+		sample_count        = 5,
+		fixed_batch_size    = 1,
+		untimed_alloc_check = obench.DEFAULT_UNTIMED_ALLOCS,
+		noise_threshold_pct = 2.0,
+	}
+	s := obench.suite_create("empty_loop_floor", cfg)
+	defer obench.suite_destroy(&s)
+	obench.bench(&s, "work", _machine_step)
+	start := time.tick_now()
+	testing.expect(t, obench.suite_execute(&s))
+	took := time.tick_since(start)
+	testing.expect(t, s.empty_loop_ns > 0, "the floor is timed")
+	testing.expectf(
+		t,
+		took >= 150 * time.Millisecond,
+		"the suite took %v, too short for two calibrated loops",
+		took,
+	)
+}
+
 @(test)
 test_ci95_counts_the_samples_correlated_samples_are_worth :: proc(t: ^testing.T) {
 	values := make([]f64, 50, context.temp_allocator)

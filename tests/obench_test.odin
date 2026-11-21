@@ -351,6 +351,29 @@ test_bigo_names_a_lower_class_that_fits_too :: proc(t: ^testing.T) {
 	}
 }
 
+// On a clock that ticks more coarsely than one window, a block's mean depends on how many
+// ticks land inside its windows. The lowest of several blocks is the one that caught the
+// fewest, at times none, so the calibration takes their median.
+@(test)
+test_clock_calibration_does_not_lean_low :: proc(t: ^testing.T) {
+	COUNT :: 300
+	values := make([]f64, COUNT, context.temp_allocator)
+	defer free_all(context.temp_allocator)
+	for &v in values {
+		v = obench.clock_calibrate().overhead_ns
+	}
+	slice.sort(values)
+	median := values[COUNT / 2]
+	testing.expectf(
+		t,
+		values[0] >= median / 2,
+		"the lowest of %d calibrations is %v ns and their median %v ns",
+		COUNT,
+		values[0],
+		median,
+	)
+}
+
 @(test)
 test_clock_overhead_is_measured :: proc(t: ^testing.T) {
 	// Two clock reads always cost something, even when the clock ticks too coarsely to
@@ -1985,6 +2008,16 @@ test_compare_baseline_flags_allocations_that_grew :: proc(t: ^testing.T) {
 		obench.compare_baseline(more_temp_bytes, base).allocs_grew,
 		"more temp bytes",
 	)
+
+	// A baseline whose samples were all clamped to 0 has no time to compare with, but its
+	// counts are exact, so more allocations still show.
+	clamped := base
+	clamped.p50_ns = 0
+	clamped.mean_ns = 0
+	against_clamped := obench.compare_baseline(more_allocs, clamped)
+	testing.expect(t, !against_clamped.has_baseline, "no time to compare")
+	testing.expect(t, against_clamped.allocs_grew, "more allocations than a clamped baseline")
+	testing.expect(t, !obench.compare_baseline(base, clamped).allocs_grew, "the same allocations")
 
 	// A count over many iterations can differ in the last bits without growing.
 	rounding := base

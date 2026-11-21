@@ -56,7 +56,13 @@ Top-level benchmark suite.
 Suite :: struct {
 	name:                     string,
 	config:                   Config,
+	// What a timed window costs, which is subtracted from every sample. Every benchmark
+	// measures it again after its warmup (see `clock_calibrate`), unless the caller set it to
+	// a value of its own.
 	clock:                    Clock_Calibration,
+	// The calibration obench measured last. While `clock` still equals it, the next benchmark
+	// calibrates again.
+	_measured_clock:          Clock_Calibration,
 	groups:                   [dynamic]^Group,
 	results:                  [dynamic]Result,
 	complexities:             [dynamic]Complexity_Estimate,
@@ -72,9 +78,9 @@ Suite :: struct {
 	failed_baseline:          int,
 	// The machine's state when the suite last ran (see `read_machine_state`).
 	machine_state:            Machine_State,
-	// Time per iteration of an empty `for step(b) {}` loop, timed after the benchmarks. A
-	// result near it most likely had its work optimized away. 0 when nothing ran or with
-	// `Config.test_mode`.
+	// Time per iteration of the `step` loop itself, timed after the benchmarks: the faster of
+	// an empty `for step(b) {}` loop and one with a `black_box` in its body. A result near it
+	// most likely had its work optimized away. 0 when nothing ran or with `Config.test_mode`.
 	empty_loop_ns:            f64,
 	// Why `Config.counters` gave no hardware counters, like "perf_event_open failed with
 	// EACCES"; "" when it did or wasn't set.
@@ -95,15 +101,17 @@ suite_create :: proc(
 ) -> Suite {
 	cfg := config.? or_else default_config()
 	_clone_config_strings(&cfg, allocator)
+	// Calibrating spins until the clock ticks, which would change an instruction count.
+	clock := clock_calibrate() if cfg.count_iterations <= 0 else Clock_Calibration{}
 	return Suite {
-		name         = strings.clone(name, allocator, loc),
-		config       = cfg,
-		// Calibrating spins until the clock ticks, which would change an instruction count.
-		clock        = clock_calibrate() if cfg.count_iterations <= 0 else {},
-		groups       = make([dynamic]^Group, allocator, loc),
-		results      = make([dynamic]Result, allocator, loc),
+		name = strings.clone(name, allocator, loc),
+		config = cfg,
+		clock = clock,
+		_measured_clock = clock,
+		groups = make([dynamic]^Group, allocator, loc),
+		results = make([dynamic]Result, allocator, loc),
 		complexities = make([dynamic]Complexity_Estimate, allocator, loc),
-		allocator    = allocator,
+		allocator = allocator,
 	}
 }
 

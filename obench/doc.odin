@@ -277,7 +277,8 @@ All the samples of a run come from one process, and two processes running the sa
 differ by more than the samples inside one. `--count 5` runs every package in 5 processes,
 each with a different memory layout, and combines their reports (`combine_runs`), keeping
 the median of every process in `process_medians_ns`. When both sides of a comparison come
-from at least two processes, the regression test compares the process medians. It takes 4
+from at least two processes, the regression test compares the process medians, and when
+only one side does, it warns and compares the samples. It takes 4
 or more a side: with fewer, the comparison can be left without a 95% interval, and then it
 decides nothing, prints `too few for 95%`, and a gate ends with status 3. `obench ab
 ../main .` builds both trees and runs them alternately on one machine, 6 rounds by default
@@ -369,6 +370,15 @@ Compile-time defaults can be changed with `-define`:
 	DEFAULT_HISTOGRAM     : bool   : #config(OBENCH_HISTOGRAM,     true)
 	// Default Spall trace output path (empty disables tracing unless set in Config).
 	DEFAULT_SPALL_PATH    : string : #config(OBENCH_SPALL_PATH,    "")
+
+Stability
+
+Not everything this package exports is promised to stay. The stable part is what a benchmark
+calls, what builds and runs a suite, and the types a suite's results are made of. STABILITY.md
+in the repository lists it. The rest (the statistics, the report readers and writers, the
+counting allocator, the clock, the hardware counters, and the formatting helpers) is exported
+for the CLI and the tests, since Odin can't export a name to some packages only, and it can
+change in any release.
 
 Limits
 

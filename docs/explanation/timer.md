@@ -2,7 +2,7 @@
 
 ## What one timed window costs
 
-Reading the clock takes time, and a timed window reads it twice. When a suite starts, obench times thousands of empty windows and takes the lowest mean of several blocks, which drops the blocks an interrupt hit. That is the `timer overhead` in the header, and obench subtracts it from every sample, once per window. The header also shows the clock's resolution, the smallest step it was seen to take: 41 ns on an Apple M2, whose clock ticks at 24 MHz. On Linux, obench reads `CLOCK_MONOTONIC_RAW` through libc, so the kernel's vDSO answers without a system call.
+Reading the clock takes time, and a timed window reads it twice. After each benchmark's warmup, obench times thousands of empty windows in blocks and takes the median of the block means, which drops the blocks an interrupt hit. It measures again for every benchmark because the cost depends on the core the benchmark has settled on: on an M2 a window costs about 14 ns on a performance core and about 22 ns on an efficiency core. obench subtracts it from every sample of that benchmark, once per window, and the `timer overhead` in the header is the last one it measured. The header also shows the clock's resolution, the smallest step it was seen to take: 41 ns on an Apple M2, whose clock ticks at 24 MHz. On Linux, obench reads `CLOCK_MONOTONIC_RAW` through libc, so the kernel's vDSO answers without a system call.
 
 A sample has one window, plus one for every `pause`/`resume` pair, since each pair starts a new one. Three notes in the table come from this:
 
@@ -14,7 +14,7 @@ The last two usually come from calling `pause` and `resume` around work that is 
 
 ## The empty loop
 
-After the benchmarks, obench times an empty `for obench.step(b) {}` loop and shows it in the header, like `empty loop 700.5 ps` on an M2. A single-threaded benchmark whose median is within 1.2 times of it gets `[near empty loop]`: there is hardly anything left of it, so the compiler most likely removed the work. Pass its input and its result through `black_box`. The report keeps the empty loop as `clock.empty_loop_ns`.
+After the benchmarks, obench times an empty `for obench.step(b) {}` loop, and the same loop with a `black_box` in its body, and shows the faster of the two in the header, like `empty loop 451.0 ps` on an M2. It times both because the empty one isn't always the fastest a `step` loop goes: on an M2 it takes about 0.7 ns per iteration and the one with the `black_box` about 0.46 ns. A single-threaded benchmark whose median is within 1.2 times of it gets `[near empty loop]`: there is hardly anything left of it, so the compiler most likely removed the work. Pass its input and its result through `black_box`. The report keeps the empty loop as `clock.empty_loop_ns`.
 
 ## The machine
 
