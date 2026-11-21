@@ -3,6 +3,7 @@ package obench_tests
 import obench "../obench"
 import "core:encoding/json"
 import "core:fmt"
+import "core:slice"
 import "core:strings"
 import "core:testing"
 
@@ -141,7 +142,9 @@ test_compare_prints_the_interval_and_expected_false_alarms :: proc(t: ^testing.T
 // Reports from two processes each, the candidate about 5% slower in both.
 @(private = "file")
 _two_process_docs :: proc() -> (baseline, candidate: obench.Export_Document) {
-	entry :: proc(medians: []f64) -> []obench.Export_Entry {
+	entry :: proc(values: []f64) -> []obench.Export_Entry {
+		// The entries outlive this procedure, so they can't point at its literals.
+		medians := slice.clone(values, context.temp_allocator)
 		entries := make([]obench.Export_Entry, 1, context.temp_allocator)
 		entries[0] = {
 			suite_name         = "s",
