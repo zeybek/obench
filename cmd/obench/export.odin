@@ -240,17 +240,17 @@ write_export :: proc(
 			append(
 				&benches,
 				_GBench_Benchmark {
-					name             = name,
-					run_name         = name,
-					run_type         = "iteration",
-					repetitions      = 1,
-					threads          = max(e.threads, 1),
-					iterations       = e.samples * e.batch_size,
-					real_time        = e.p50_ns,
-					cpu_time         = e.p50_ns,
-					time_unit        = "ns",
+					name = name,
+					run_name = name,
+					run_type = "iteration",
+					repetitions = 1,
+					threads = max(e.threads, 1),
+					iterations = e.samples * e.batch_size,
+					real_time = e.p50_ns,
+					cpu_time = e.p50_ns,
+					time_unit = "ns",
 					items_per_second = e.items_per_sec,
-					bytes_per_second = e.mb_per_sec * 1024 * 1024, // from MiB/s
+					bytes_per_second = e.mb_per_sec * 1024 * 1024,
 				},
 			)
 		}
