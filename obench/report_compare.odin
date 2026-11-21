@@ -22,6 +22,10 @@ Comparison_Summary :: struct {
 	errored:                 int,
 	// Matched benchmarks whose heap or temp allocations or bytes per operation went up.
 	alloc_regressions:       int,
+	// Matched benchmarks where only one side comes from several processes (`combine_runs`,
+	// `obench --count`). They were compared on their samples and not on process medians, and
+	// samples from one process flag unchanged code far more often.
+	one_sided_processes:     int,
 	// Matched benchmarks with too few processes or samples a side for a 95% interval
 	// (`Baseline_Diff.too_few_samples`). They count as `unchanged`, since nothing was decided.
 	undecided:               int,
@@ -130,6 +134,9 @@ compare_documents :: proc(
 		}
 		if diff.too_few_samples {
 			summary.undecided += 1
+		}
+		if (len(new_st.process_medians_ns) >= 2) != (len(old_st.process_medians_ns) >= 2) {
+			summary.one_sided_processes += 1
 		}
 		if ratio := 1.0 + diff.delta_median_pct / 100.0; diff.has_baseline && ratio > 0 {
 			ratio_log_sum += math.ln(ratio)
@@ -250,6 +257,16 @@ write_comparison :: proc(
 			p.reset,
 			_alloc_counting_string(baseline.untimed_allocs),
 			_alloc_counting_string(candidate.untimed_allocs),
+		)
+	}
+
+	if summary.one_sided_processes > 0 {
+		fmt.wprintf(
+			w,
+			"%swarning:%s only one side comes from several processes, so %d benchmark(s) were compared on their samples, which flag unchanged code more often: run both sides with --count\n",
+			p.red,
+			p.reset,
+			summary.one_sided_processes,
 		)
 	}
 
@@ -433,6 +450,14 @@ write_comparison_markdown :: proc(
 			"- The baseline counted allocations %s and the candidate %s, so the times of benchmarks that allocate can't be compared.\n",
 			_alloc_counting_string(baseline.untimed_allocs),
 			_alloc_counting_string(candidate.untimed_allocs),
+		)
+		warned = true
+	}
+	if summary.one_sided_processes > 0 {
+		fmt.wprintf(
+			w,
+			"- Only one side comes from several processes, so %d benchmark(s) were compared on their samples, which flag unchanged code more often. Run both sides with `--count`.\n",
+			summary.one_sided_processes,
 		)
 		warned = true
 	}
