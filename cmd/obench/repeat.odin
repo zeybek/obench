@@ -181,6 +181,26 @@ _print_process_medians :: proc(doc: obench.Export_Document, color: bool) {
 	fmt.println()
 }
 
+// Process medians a side from which a comparison always has a 95% interval
+// (`obench.hodges_lehmann_shift`).
+MIN_PROCESSES_FOR_VERDICT :: 4
+
+/*
+The warning for a `--count` or `--rounds` below `MIN_PROCESSES_FOR_VERDICT`, or "" when
+`processes` is enough or the run is a single process. `flag` is the flag as typed.
+*/
+few_processes_warning :: proc(flag: string, processes: int) -> string {
+	if processes < 2 || processes >= MIN_PROCESSES_FOR_VERDICT {
+		return ""
+	}
+	return fmt.tprintf(
+		"%s %d: with fewer than %d processes on both sides a comparison can be left without a 95%% interval, and then it decides nothing",
+		flag,
+		processes,
+		MIN_PROCESSES_FOR_VERDICT,
+	)
+}
+
 // The options of a process that only measures: the combined report is compared and saved
 // afterwards.
 measuring_options :: proc(opts: CLI_Options) -> CLI_Options {

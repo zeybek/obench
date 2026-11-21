@@ -2,6 +2,14 @@
 
 Every release with a breaking change gets a section here: what changed, how it shows, and what to do. A section can be there before its release is out, and then it lists what has changed on `main` so far. The [release notes](https://github.com/zeybek/obench/releases) list all changes, and [STABILITY.md](../STABILITY.md) says what counts as breaking.
 
+## 0.4 to 0.5
+
+### A comparison with too few processes decides nothing
+
+With 2 or 3 processes a side, as from `--count 2`, `--count 3`, or `obench ab --rounds 2` or `3`, the interval that `compare` printed as the 95% interval of the change covered 67% or 90% (#92). It flagged unchanged code: on an M2, reports from `--count 2` flagged 117 of 555 comparisons of the examples against themselves. Such a comparison is now left undecided. It prints the range of the change with `too few for 95%`, counts as unchanged, and under `--fail-on-regression` the run ends with status 3 where it used to end with 0 or 1.
+
+Run 4 or more processes on both sides: `--count 4` or more, and at least 4 rounds of `ab`, whose default is 6. A side with 2 or 3 processes still gets an interval against a larger one, 2 against 8 or more and 3 against 5 or more. In the API, `hodges_lehmann_shift` returns `ok = false` for these cases, `Baseline_Diff` has `too_few_samples`, and `Comparison_Summary` has `undecided`.
+
 ## 0.3 to 0.4
 
 ### A regression needs its whole interval above the threshold

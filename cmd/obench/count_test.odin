@@ -29,3 +29,13 @@ test_parse_cli_args_count :: proc(t: ^testing.T) {
 		testing.expectf(t, err != "", "%v should be a usage error", args)
 	}
 }
+
+@(test)
+test_few_processes_get_a_warning :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	testing.expect_value(t, few_processes_warning("--count", 1), "")
+	testing.expect(t, few_processes_warning("--count", 2) != "")
+	testing.expect(t, few_processes_warning("--rounds", 3) != "")
+	testing.expect_value(t, few_processes_warning("--count", 4), "")
+	testing.expect_value(t, few_processes_warning("--rounds", 6), "")
+}

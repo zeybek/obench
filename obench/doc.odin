@@ -277,11 +277,15 @@ All the samples of a run come from one process, and two processes running the sa
 differ by more than the samples inside one. `--count 5` runs every package in 5 processes,
 each with a different memory layout, and combines their reports (`combine_runs`), keeping
 the median of every process in `process_medians_ns`. When both sides of a comparison come
-from at least two processes, the regression test compares the process medians. `obench ab
+from at least two processes, the regression test compares the process medians. It takes 4
+or more a side: with fewer, the comparison can be left without a 95% interval, and then it
+decides nothing, prints `too few for 95%`, and a gate ends with status 3. `obench ab
 ../main .` builds both trees and runs them alternately on one machine, 6 rounds by default
 (`--rounds`), and `obench compare a1.json a2.json -- b1.json b2.json` combines several
 reports per side. `--count` writes `--json`, `--save-baseline`, and `--html`, but not
-`--md`, `--csv`, or `--spall`. See
+`--md`, `--csv`, or `--spall`. A combined report has `samples_batch_ns` only when every
+process used the same batch size, as with `--batch-size`, because its one `batch_size`
+can't describe batches of several sizes. See
 https://github.com/zeybek/obench/blob/main/docs/how-to/ci-gate.md for a gate that holds.
 
 Selecting benchmarks

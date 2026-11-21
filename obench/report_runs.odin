@@ -9,8 +9,11 @@ runs, into one: the report of the first process, with every benchmark's samples 
 process order, its statistics computed again over the pooled samples, and the median of
 each process kept in `process_medians_ns`, which the regression test compares when both
 sides have at least two (see `compare_baseline`). A benchmark that failed in any process
-keeps that error. Allocation counts, custom metrics, and complexity fits come from the
-first process that has the benchmark. A report that already combines processes counts as
+keeps that error. Allocation counts, custom metrics, `batch_size`, and complexity fits come
+from the first process that has the benchmark. `samples_batch_ns` is pooled as well when
+every process used the same batch size, as with a fixed one, and left out otherwise: each
+process calibrates its own batch, and one `batch_size` can't describe batches of several
+sizes. A report that already combines processes counts as
 that many, with its process medians carried over, so `processes` is the total.
 
 Everything is allocated with `allocator`; the strings still point into `docs`.
@@ -86,7 +89,9 @@ _combine_entry :: proc(entries: []Export_Entry, allocator := context.allocator) 
 	defer delete(cycles, allocator)
 	clamped := 0
 	overhead_share: f64 = 0
+	same_batch_size := true
 	for e, i in entries {
+		same_batch_size &&= e.batch_size == first.batch_size
 		append(&pooled, ..e.samples_ns)
 		append(&pooled_batch, ..e.samples_batch_ns)
 		// A report that already combines processes brings their medians along.
@@ -101,7 +106,12 @@ _combine_entry :: proc(entries: []Export_Entry, allocator := context.allocator) 
 	}
 	out.process_medians_ns = medians[:]
 	out.samples_ns = pooled[:]
-	out.samples_batch_ns = pooled_batch[:]
+	if same_batch_size {
+		out.samples_batch_ns = pooled_batch[:]
+	} else {
+		delete(pooled_batch)
+		out.samples_batch_ns = nil
+	}
 	out.samples = len(pooled)
 	out.clamped_samples = clamped
 	out.overhead_share = overhead_share / f64(len(entries))

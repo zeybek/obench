@@ -282,23 +282,34 @@ sed 's/"cpu": "[^"]*"/"cpu": "Another CPU"/' "$WORK/cpu_a.json" > "$WORK/cpu_b.j
 grep -q "was measured on Another CPU" "$WORK/cpu_err.txt" || fail "expected a warning about the baseline's CPU"
 
 step "--count runs a package in several processes and combines their reports"
-"$OBENCH" examples/sorting --count 3 -n 5 -w 2 --no-color --json "$WORK_N/count.json" > "$WORK/count.txt"
-grep -q "sorting_bench over 3 processes" "$WORK/count.txt" || fail "expected the combined table of 3 processes"
-grep -q '"processes": 3' "$WORK/count.json" || fail "expected processes in the combined report"
+"$OBENCH" examples/sorting --count 4 -n 5 -w 2 --no-color --json "$WORK_N/count.json" > "$WORK/count.txt"
+grep -q "sorting_bench over 4 processes" "$WORK/count.txt" || fail "expected the combined table of 4 processes"
+grep -q '"processes": 4' "$WORK/count.json" || fail "expected processes in the combined report"
 grep -q '"process_medians_ns"' "$WORK/count.json" || fail "expected the process medians in the report"
 set +e
-"$OBENCH" examples/sorting --count 3 -n 5 -w 2 --no-color --baseline "$WORK_N/count.json" \
+"$OBENCH" examples/sorting --count 4 -n 5 -w 2 --no-color --baseline "$WORK_N/count.json" \
   --fail-on-regression > "$WORK/count_cmp.txt"; code=$?
 set -e
 [ "$code" -le 1 ] || fail "expected --count against its own baseline to compare, got exit $code"
 grep -q "matched" "$WORK/count_cmp.txt" || fail "expected --count to compare with the baseline"
 "$OBENCH" "$WORK_N/regress" --collection "libs=$ROOT_N" --define WORK=1000 -n 10 -w 5 --no-color \
-  --count 3 --json "$WORK_N/fast3.json" >/dev/null
+  --count 4 --json "$WORK_N/fast3.json" >/dev/null
 set +e
 "$OBENCH" "$WORK_N/regress" --collection "libs=$ROOT_N" --define WORK=10000 -n 10 -w 5 --no-color \
-  --count 3 --baseline "$WORK_N/fast3.json" --fail-on-regression >/dev/null; code=$?
+  --count 4 --baseline "$WORK_N/fast3.json" --fail-on-regression >/dev/null; code=$?
 set -e
 [ "$code" -eq 1 ] || fail "expected --count to catch a 10x slowdown, got exit $code"
+set +e
+"$OBENCH" compare "$WORK_N/count.json" "$WORK_N/count.json" --no-color --fail-on-regression >/dev/null; code=$?
+set -e
+[ "$code" -eq 0 ] || fail "expected a --count 4 report to compare with itself, got exit $code"
+"$OBENCH" examples/sorting --count 2 -n 5 -w 2 --no-color --json "$WORK_N/count2.json" > /dev/null 2> "$WORK/count2.err"
+grep -q "warning: --count 2" "$WORK/count2.err" || fail "expected a warning for --count 2"
+set +e
+"$OBENCH" compare "$WORK_N/count2.json" "$WORK_N/count2.json" --no-color --fail-on-regression > "$WORK/count2_cmp.txt"; code=$?
+set -e
+[ "$code" -eq 3 ] || fail "expected a gate on 2 processes a side to exit 3, got exit $code"
+grep -q "too few for 95%" "$WORK/count2_cmp.txt" || fail "expected the undecided rows to say why"
 
 step "compare combines several reports per side, and ab alternates two trees"
 "$OBENCH" compare "$WORK_N/count.json" "$WORK_N/count.json" -- "$WORK_N/count.json" --no-color \
