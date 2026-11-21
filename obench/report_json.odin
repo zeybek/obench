@@ -99,6 +99,9 @@ Export_Complexity :: struct {
 	intercept:   f64 `json:"intercept"`,
 	r_squared:   f64 `json:"r_squared"`,
 	nrmse:       f64 `json:"nrmse"`,
+	// The lowest class below `complexity` that fits about as well
+	// (`Complexity_Estimate.also_fits`), left out when there is none.
+	also_fits:   string `json:"also_fits,omitempty"`,
 }
 
 /*
@@ -269,6 +272,7 @@ export_document :: proc(
 			group_name  = c.group_name,
 			bench_name  = c.bench_name,
 			complexity  = complexity_string(c.best_class),
+			also_fits   = complexity_string(c.also_fits) if c.also_fits != .None else "",
 			coefficient = c.coefficient,
 			intercept   = c.intercept,
 			r_squared   = c.r_squared,

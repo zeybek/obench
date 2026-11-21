@@ -636,7 +636,7 @@ _write_group_complexities :: proc(w: io.Writer, s: ^Suite, group_name: string, p
 				est.bench_name,
 				p.reset,
 			),
-			fmt.tprintf("→ %s%s%s", p.bold, complexity_string(est.best_class), p.reset),
+			fmt.tprintf("→ %s%s%s", p.bold, _complexity_label(est), p.reset),
 			fmt.tprintf(
 				"%s(R²=%.3f, NRMSE=%.1f%%)%s",
 				p.dim,

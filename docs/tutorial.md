@@ -103,7 +103,7 @@ The header names the suite, the platform, and the optimization mode, and then wh
 
 The last column starts with a histogram of the samples between the fastest and p99. `2.62x faster` compares a benchmark with the first one of its group for the same parameter, and only appears when the difference clears a significance test. `[drifts -6%]` means the times moved steadily during the run, and `[2 modes]` that the samples fell into two groups. Both usually mean the machine changed speed while it ran. [How obench decides that something changed](explanation/statistics.md) explains them.
 
-The `complexity` lines fit a Big-O class to each benchmark's times across the `@params` sizes. Both are O(N) here.
+The `complexity` lines fit a Big-O class to each benchmark's times across the `@params` sizes. Both are O(N) here. A line like `O(N log N) or O(N)` means both classes fit the sizes you gave, and more sizes would tell them apart.
 
 ## 5. Compare with the next change
 

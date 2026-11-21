@@ -1,5 +1,6 @@
 package obench
 
+import "core:fmt"
 import "core:math"
 
 /*
@@ -27,6 +28,9 @@ Complexity_Estimate :: struct {
 	intercept:   f64, // Fixed cost `a` in `T(N) ≈ a + c * f(N)` (in nanoseconds); 0 for O(1)
 	nrmse:       f64, // Normalized Root Mean Square Error (lower is better; 0.0 = exact fit)
 	r_squared:   f64, // R^2 in [0.0, 1.0] of the fitted curve; for O(1), 1 - NRMSE^2 (how flat the times are)
+	// The lowest class below `best_class` that fits the same points about as well, so the
+	// points can't tell the two apart (see `estimate_complexity`). `.None` when there is none.
+	also_fits:   Complexity_Class,
 }
 
 /*
@@ -88,6 +92,11 @@ $a, c \ge 0$, so a fixed cost per call doesn't distort the slope. A growing clas
 counts when it explains the times significantly better than a constant (an F-test at the 5%
 level against the O(1) fit); among those, the lowest NRMSE wins, with a 0.5% margin in
 favor of the lower class. When no growing class passes, the result is O(1).
+
+A handful of sizes often can't tell two classes apart. `also_fits` names the lowest class
+below the winner that passed the F-test too and whose residual sum of squares is at most the
+winner's times the 5% critical value of F with $M - 2$ and $M - 2$ degrees of freedom (6.39
+for 6 sizes). The reports then show both, as in `O(N log N) or O(N)`.
 */
 @(require_results)
 estimate_complexity :: proc "contextless" (
@@ -146,7 +155,10 @@ estimate_complexity :: proc "contextless" (
 	f_crit := _f_critical_1(m - 2)
 	best_nrmse := max(f64)
 	growing := [?]Complexity_Class{.O_Log_N, .O_N, .O_N_Log_N, .O_N2, .O_N3}
-	for cand in growing {
+	// Residual sum of squares of every class that passed, -1 for the others.
+	passed_ss: [len(growing)]f64 = -1
+	best := -1
+	for cand, ci in growing {
 		mean_f: f64 = 0
 		for p in params {
 			mean_f += _eval_curve(cand, f64(p))
@@ -189,8 +201,10 @@ estimate_complexity :: proc "contextless" (
 		}
 
 		nrmse := math.sqrt(ss_res / f64(m)) / mean_t
+		passed_ss[ci] = ss_res
 		if nrmse + 0.005 < best_nrmse {
 			best_nrmse = nrmse
+			best = ci
 			est.best_class = cand
 			est.coefficient = coeff
 			est.intercept = intercept
@@ -198,5 +212,27 @@ estimate_complexity :: proc "contextless" (
 			est.r_squared = clamp(1.0 - ss_res / ss_tot, 0.0, 1.0)
 		}
 	}
+	if best > 0 {
+		limit := _f_critical_95(f64(m - 2), f64(m - 2)) * passed_ss[best]
+		for ci in 0 ..< best {
+			if passed_ss[ci] >= 0 && passed_ss[ci] <= limit {
+				est.also_fits = growing[ci]
+				break
+			}
+		}
+	}
 	return est, true
+}
+
+// `O(N log N) or O(N)` when a lower class fits the same points about as well, else `O(N)`.
+@(private)
+_complexity_label :: proc(est: Complexity_Estimate) -> string {
+	if est.also_fits == .None {
+		return complexity_string(est.best_class)
+	}
+	return fmt.tprintf(
+		"%s or %s",
+		complexity_string(est.best_class),
+		complexity_string(est.also_fits),
+	)
 }
