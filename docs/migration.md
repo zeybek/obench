@@ -10,6 +10,12 @@ With 2 or 3 processes a side, as from `--count 2`, `--count 3`, or `obench ab --
 
 Run 4 or more processes on both sides: `--count 4` or more, and at least 4 rounds of `ab`, whose default is 6. A side with 2 or 3 processes still gets an interval against a larger one, 2 against 8 or more and 3 against 5 or more. In the API, `hodges_lehmann_shift` returns `ok = false` for these cases, `Baseline_Diff` has `too_few_samples`, and `Comparison_Summary` has `undecided`.
 
+### STABILITY.md promises less of the package
+
+[STABILITY.md](../STABILITY.md) used to count every exported name of the package as public API, 162 of them in 0.4.0, each with a deprecation step before it could change. Most are exported only because the CLI and the tests, which are packages of their own, call them (#98). It now lists the stable part: what a benchmark calls, what builds and runs a suite, and the types a suite's results are made of. The rest, like the statistics, the report readers and writers, and the counting allocator, can change in any release.
+
+Nothing was removed or renamed in this release. If your code calls something outside the list, it keeps working, but a later release can change it without the deprecation step. The release notes will say when one does.
+
 ## 0.3 to 0.4
 
 ### A regression needs its whole interval above the threshold
