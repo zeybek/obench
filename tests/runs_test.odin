@@ -94,3 +94,47 @@ test_combine_runs_carries_the_processes_of_combined_reports :: proc(t: ^testing.
 	testing.expect_value(t, medians[1], 12.0)
 	testing.expect_value(t, medians[2], 11.0)
 }
+
+@(private = "file")
+_batch_doc :: proc(batch_size: int, samples_batch_ns: []u64) -> obench.Export_Document {
+	samples_ns := make([]f64, len(samples_batch_ns), context.temp_allocator)
+	for v, i in samples_batch_ns {
+		samples_ns[i] = f64(v) / f64(batch_size)
+	}
+	entries := make([]obench.Export_Entry, 1, context.temp_allocator)
+	entries[0] = obench.Export_Entry {
+		suite_name       = "s",
+		full_name        = "work",
+		samples          = len(samples_ns),
+		batch_size       = batch_size,
+		p50_ns           = samples_ns[len(samples_ns) / 2],
+		samples_ns       = samples_ns,
+		samples_batch_ns = samples_batch_ns,
+	}
+	return obench.Export_Document {
+		format_version = obench.REPORT_FORMAT_VERSION,
+		benchmarks = entries,
+	}
+}
+
+// Every process calibrates its own batch, and the combined entry has one `batch_size`.
+@(test)
+test_combine_runs_keeps_batch_samples_only_for_one_batch_size :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+
+	same := obench.combine_runs(
+		{_batch_doc(100, {1000, 1100}), _batch_doc(100, {1200, 1300})},
+		context.temp_allocator,
+	)
+	testing.expect_value(t, same.benchmarks[0].batch_size, 100)
+	testing.expect_value(t, len(same.benchmarks[0].samples_batch_ns), 4)
+	testing.expect_value(t, same.benchmarks[0].samples_batch_ns[3], 1300)
+
+	mixed := obench.combine_runs(
+		{_batch_doc(100, {1000, 1100}), _batch_doc(120, {1200, 1320})},
+		context.temp_allocator,
+	)
+	testing.expect_value(t, mixed.benchmarks[0].samples, 4)
+	testing.expect_value(t, len(mixed.benchmarks[0].samples_ns), 4)
+	testing.expect_value(t, len(mixed.benchmarks[0].samples_batch_ns), 0)
+}

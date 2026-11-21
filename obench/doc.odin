@@ -281,7 +281,9 @@ from at least two processes, the regression test compares the process medians. `
 ../main .` builds both trees and runs them alternately on one machine, 6 rounds by default
 (`--rounds`), and `obench compare a1.json a2.json -- b1.json b2.json` combines several
 reports per side. `--count` writes `--json`, `--save-baseline`, and `--html`, but not
-`--md`, `--csv`, or `--spall`. See
+`--md`, `--csv`, or `--spall`. A combined report has `samples_batch_ns` only when every
+process used the same batch size, as with `--batch-size`, because its one `batch_size`
+can't describe batches of several sizes. See
 https://github.com/zeybek/obench/blob/main/docs/how-to/ci-gate.md for a gate that holds.
 
 Selecting benchmarks
