@@ -91,6 +91,38 @@ test_empty_loop_and_the_notes_it_drives :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(report, "[2 modes]"), report)
 }
 
+// `fixed_batch_size` is for the benchmarks. With a batch of 1 the empty loop would be a
+// single iteration per sample, far below what the clock can resolve. Timing it shows which
+// batch it got: the benchmark's 5 samples of one iteration take microseconds, and 5 calibrated
+// samples of the empty loop take 10 ms each.
+@(test)
+test_empty_loop_is_calibrated_whatever_the_batch_size :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	cfg := obench.Config {
+		warmup_time         = 0,
+		min_sample_time     = 10 * time.Millisecond,
+		max_bench_time      = 50 * time.Millisecond,
+		sample_count        = 5,
+		fixed_batch_size    = 1,
+		untimed_alloc_check = obench.DEFAULT_UNTIMED_ALLOCS,
+		noise_threshold_pct = 2.0,
+	}
+	s := obench.suite_create("empty_loop_batch", cfg)
+	defer obench.suite_destroy(&s)
+	obench.bench(&s, "work", _machine_step)
+	start := time.tick_now()
+	testing.expect(t, obench.suite_execute(&s))
+	took := time.tick_since(start)
+	testing.expect_value(t, s.results[0].stats.batch_size, 1)
+	testing.expect(t, s.empty_loop_ns > 0, "the empty loop is timed")
+	testing.expectf(
+		t,
+		took >= 25 * time.Millisecond,
+		"the suite took %v, so the empty loop ran with the benchmarks' batch of 1",
+		took,
+	)
+}
+
 @(test)
 test_ci95_counts_the_samples_correlated_samples_are_worth :: proc(t: ^testing.T) {
 	values := make([]f64, 50, context.temp_allocator)
