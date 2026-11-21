@@ -527,8 +527,8 @@ _has_several_suites :: proc(entries: []Export_Entry) -> bool {
 
 /*
 Loads a saved JSON report into `out_map`, keyed by `full_name`. Keys and each valid entry's
-`samples_ns`, `samples_batch_ns`, and custom metric units are allocated with `allocator`;
-`destroy_baseline_map` frees them. Invalid `samples_batch_ns` slices (for example
+`samples_ns`, `samples_batch_ns`, `process_medians_ns`, and custom metric units are allocated
+with `allocator`; `destroy_baseline_map` frees them. Invalid `samples_batch_ns` slices (for example
 `samples <= 0`, `batch_size <= 0`, mismatched lengths, or values exceeding `max(i64)`) are
 dropped to `nil`.
 
@@ -651,12 +651,14 @@ _fill_baseline_map :: proc(
 		st := _export_entry_stats(e)
 		st.samples_ns = slice.clone(e.samples_ns, allocator)
 		st.samples_batch_ns = slice.clone(st.samples_batch_ns, allocator)
+		st.process_medians_ns = slice.clone(e.process_medians_ns, allocator)
 		for i in 0 ..< st.custom_metrics_count {
 			st.custom_metrics[i].unit = strings.clone(st.custom_metrics[i].unit, allocator)
 		}
 		if old, found := out_map[e.full_name]; found {
 			delete(old.samples_ns, allocator)
 			delete(old.samples_batch_ns, allocator)
+			delete(old.process_medians_ns, allocator)
 			for i in 0 ..< old.custom_metrics_count {
 				delete(old.custom_metrics[i].unit, allocator)
 			}
@@ -669,7 +671,7 @@ _fill_baseline_map :: proc(
 
 /*
 Frees a map filled by `load_baseline_file`: its keys, every entry's `samples_ns`,
-`samples_batch_ns`, custom metric units, and the map. `allocator` must be the one passed to
+`samples_batch_ns`, `process_medians_ns`, custom metric units, and the map. `allocator` must be the one passed to
 `load_baseline_file`.
 */
 destroy_baseline_map :: proc(m: ^map[string]Stats, allocator: runtime.Allocator) {
@@ -677,6 +679,7 @@ destroy_baseline_map :: proc(m: ^map[string]Stats, allocator: runtime.Allocator)
 		delete(k, allocator)
 		delete(st.samples_ns, allocator)
 		delete(st.samples_batch_ns, allocator)
+		delete(st.process_medians_ns, allocator)
 		for i in 0 ..< st.custom_metrics_count {
 			delete(st.custom_metrics[i].unit, allocator)
 		}
