@@ -477,6 +477,27 @@ t_critical_975 :: proc "contextless" (df: f64) -> f64 {
 	return Z + g1 / d + g2 / (d * d) + g3 / (d * d * d) + g4 / (d * d * d * d)
 }
 
+// Upper 5% critical value of the F distribution with `d1` and `d2` degrees of freedom. The
+// distribution function of F at x is $I_y(d_1/2, d_2/2)$ with $y = d_1 x / (d_1 x + d_2)$,
+// which grows with y, so this bisects y until the interval stops shrinking.
+@(private)
+_f_critical_95 :: proc "contextless" (d1, d2: f64) -> f64 {
+	lo, hi: f64 = 0, 1
+	for _ in 0 ..< 200 {
+		mid := (lo + hi) / 2
+		if mid <= lo || mid >= hi {
+			break
+		}
+		if _incomplete_beta(d1 / 2, d2 / 2, mid) < 0.95 {
+			lo = mid
+		} else {
+			hi = mid
+		}
+	}
+	y := (lo + hi) / 2
+	return d2 * y / (d1 * (1 - y))
+}
+
 // Regularized incomplete beta function $I_x(a, b)$ for `a, b > 0`.
 @(private = "file")
 _incomplete_beta :: proc "contextless" (a, b, x: f64) -> f64 {

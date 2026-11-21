@@ -122,7 +122,7 @@ write_markdown_report :: proc(w: io.Writer, s: ^Suite) -> io.Error {
 				ctbl,
 				fmt.tprintf("`%s`", _md_cell(c.group_name)),
 				fmt.tprintf("`%s`", _md_cell(c.bench_name)),
-				fmt.tprintf("**`%s`**", complexity_string(c.best_class)),
+				fmt.tprintf("**`%s`**", _complexity_label(c)),
 				fmt.tprintf("%.4f", c.r_squared),
 				fmt.tprintf("%.2f%%", c.nrmse * 100.0),
 			)

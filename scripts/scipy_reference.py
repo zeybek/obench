@@ -228,9 +228,11 @@ def fit_complexity(params, times):
         "intercept": 0.0,
         "nrmse": const_nrmse,
         "r_squared": min(max(1.0 - const_nrmse**2, 0.0), 1.0),
+        "also_fits": "None",
     }
     f_crit = stats.f.ppf(0.95, 1, m - 2)
     best_nrmse = math.inf
+    passed_ss = {}
     for cls in CLASSES:
         f = curve(cls, params)
         (c, a), *_ = np.linalg.lstsq(np.column_stack([f, np.ones(m)]), t, rcond=None)
@@ -255,6 +257,7 @@ def fit_complexity(params, times):
             if f_stat <= f_crit:
                 continue
         nrmse = math.sqrt(ss_res / m) / mean_t
+        passed_ss[cls] = ss_res
         if best_nrmse < math.inf and abs(nrmse + 0.005 - best_nrmse) < MARGIN:
             return None
         if nrmse + 0.005 < best_nrmse:
@@ -265,7 +268,19 @@ def fit_complexity(params, times):
                 "intercept": float(a),
                 "nrmse": nrmse,
                 "r_squared": min(max(1.0 - ss_res / ss_tot, 0.0), 1.0),
+                "also_fits": "None",
             }
+    if best["class"] != "O_1":
+        # The lowest class below the winner whose residuals aren't significantly larger.
+        limit = stats.f.ppf(0.95, m - 2, m - 2) * passed_ss[best["class"]]
+        for cls in CLASSES[: CLASSES.index(best["class"])]:
+            if cls not in passed_ss:
+                continue
+            if limit > 0 and abs(passed_ss[cls] / limit - 1.0) < MARGIN:
+                return None
+            if passed_ss[cls] <= limit:
+                best["also_fits"] = cls
+                break
     return best
 
 
