@@ -20,7 +20,7 @@ report, paste the obench output from before and after. -->
 - [ ] `make check test smoke` passes
 - [ ] `make fmt-check` passes, or I couldn't run odinfmt and CI will check it
 - [ ] Changes to `black_box`, `keep_alive`, or `clobber_memory` pass `make check-barriers`
-- [ ] New behavior has a test in `tests/` or `cmd/obench/main_test.odin`
+- [ ] New behavior has a test in `tests/` or in a `*_test.odin` file in `cmd/obench/`
 - [ ] New or changed public declarations have doc comments, and `obench/doc.odin` covers anything users need to know
 - [ ] A change to the JSON report layout bumps `REPORT_FORMAT_VERSION`
 - [ ] A breaking change (`feat!:` or `fix!:`) has a section in `docs/migration.md`
