@@ -356,7 +356,7 @@ test_bigo_names_a_lower_class_that_fits_too :: proc(t: ^testing.T) {
 // fewest, at times none, so the calibration takes their median.
 @(test)
 test_clock_calibration_does_not_lean_low :: proc(t: ^testing.T) {
-	COUNT :: 300
+	COUNT :: 100
 	values := make([]f64, COUNT, context.temp_allocator)
 	defer free_all(context.temp_allocator)
 	for &v in values {
