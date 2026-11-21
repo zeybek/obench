@@ -10,6 +10,10 @@ With 2 or 3 processes a side, as from `--count 2`, `--count 3`, or `obench ab --
 
 Run 4 or more processes on both sides: `--count 4` or more, and at least 4 rounds of `ab`, whose default is 6. A side with 2 or 3 processes still gets an interval against a larger one, 2 against 8 or more and 3 against 5 or more. In the API, `hodges_lehmann_shift` returns `ok = false` for these cases, `Baseline_Diff` has `too_few_samples`, and `Comparison_Summary` has `undecided`.
 
+### `--instructions` refuses the flags it ignored
+
+`--instructions` runs every benchmark alone under Cachegrind and only counts instructions. It used to accept `--fail-on-alloc-regression`, `--zero-alloc`, `--test`, `--md`, `--csv`, `--html`, and `--spall` and do nothing with them, so a job could look like it gated on allocations when it didn't (#102). These are usage errors now, with exit status 2. Take them off the `--instructions` command, and run the allocation gate, the `@zero_alloc` checks, and the other reports in a normal run next to it.
+
 ## 0.3 to 0.4
 
 ### A regression needs its whole interval above the threshold

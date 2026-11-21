@@ -79,7 +79,7 @@ obench --instructions --save-baseline instructions.json
 obench --instructions --baseline instructions.json --fail-on-regression --threshold 1
 ```
 
-It fails when a benchmark needs more than `--threshold` percent more instructions. The count includes the work between `pause` and `resume`, and parallel benchmarks and packages with their own `main` are skipped.
+It fails when a benchmark needs more than `--threshold` percent more instructions. The count includes the work between `pause` and `resume`, and parallel benchmarks and packages with their own `main` are skipped. It only counts instructions, so `--fail-on-alloc-regression`, `--zero-alloc`, `--test`, and the `--md`, `--csv`, `--html`, and `--spall` reports are usage errors with it: run those in a normal run next to it.
 
 ## Check that the benchmarks still work
 
