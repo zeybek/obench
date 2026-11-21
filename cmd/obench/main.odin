@@ -168,7 +168,8 @@ RUN OPTIONS:
       --instructions             Count instructions per op exactly under Valgrind's
                                  Cachegrind (Linux), with --batch-size iterations (default
                                  100) and twice that; --json, --save-baseline, --baseline,
-                                 --threshold and --fail-on-regression work on the counts
+                                 --threshold and --fail-on-regression work on the counts, and
+                                 the other gates, checks and report files are refused
       --zero-alloc               Treat every benchmark as @zero_alloc
       --untimed-allocs           Count allocations in one untimed batch after sampling (default)
       --timed-allocs             Count allocations in every timed sample, which adds the
@@ -439,6 +440,16 @@ parse_cli_args :: proc(
 	case f.count > 1 && (f.test || f.instructions):
 		return opts,
 			"--count repeats a measured run, so it can't be used with --test or --instructions"
+	case f.instructions &&
+	     (f.fail_on_alloc_regression ||
+			     f.zero_alloc ||
+			     f.test ||
+			     f.md != "" ||
+			     f.csv != "" ||
+			     f.html != "" ||
+			     f.spall != ""):
+		return opts,
+			"--instructions only counts instructions, so it can't be used with --fail-on-alloc-regression, --zero-alloc, --test, --md, --csv, --html or --spall"
 	case f.untimed_allocs && f.timed_allocs:
 		return opts, "--untimed-allocs and --timed-allocs can't be used together"
 	case f.batch_size != UNSET && f.batch_size <= 0:
