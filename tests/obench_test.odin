@@ -2009,6 +2009,16 @@ test_compare_baseline_flags_allocations_that_grew :: proc(t: ^testing.T) {
 		"more temp bytes",
 	)
 
+	// A baseline whose samples were all clamped to 0 has no time to compare with, but its
+	// counts are exact, so more allocations still show.
+	clamped := base
+	clamped.p50_ns = 0
+	clamped.mean_ns = 0
+	against_clamped := obench.compare_baseline(more_allocs, clamped)
+	testing.expect(t, !against_clamped.has_baseline, "no time to compare")
+	testing.expect(t, against_clamped.allocs_grew, "more allocations than a clamped baseline")
+	testing.expect(t, !obench.compare_baseline(base, clamped).allocs_grew, "the same allocations")
+
 	// A count over many iterations can differ in the last bits without growing.
 	rounding := base
 	rounding.allocs_per_op = 2 + 1e-12

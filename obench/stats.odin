@@ -149,7 +149,8 @@ Baseline_Diff :: struct {
 	is_regression:    bool,
 	is_improvement:   bool,
 	// Heap or temp allocations or bytes per operation went up. The counts are exact, so no test
-	// is needed; `fail_on_alloc_regression` turns this into a failure.
+	// is needed; `fail_on_alloc_regression` turns this into a failure. It is also set when
+	// `has_baseline` is false because the baseline's time is 0 (all its samples were clamped).
 	allocs_grew:      bool,
 }
 
@@ -686,8 +687,23 @@ compare_baseline :: proc(
 	noise_threshold_pct: f64 = 2.0,
 	allocator := context.temp_allocator,
 ) -> Baseline_Diff {
-	if baseline.samples <= 0 || baseline.p50_ns <= 0 || baseline.mean_ns <= 0 {
+	// Per-operation counts are a count divided by the iterations, so allow for rounding.
+	grew :: proc(current, baseline: f64) -> bool {
+		return current > baseline + max(1e-9, abs(baseline) * 1e-9)
+	}
+	allocs_grew :=
+		grew(current.allocs_per_op, baseline.allocs_per_op) ||
+		grew(current.alloc_bytes_per_op, baseline.alloc_bytes_per_op) ||
+		grew(current.temp_allocs_per_op, baseline.temp_allocs_per_op) ||
+		grew(current.temp_bytes_per_op, baseline.temp_bytes_per_op)
+
+	if baseline.samples <= 0 {
 		return Baseline_Diff{has_baseline = false}
+	}
+	if baseline.p50_ns <= 0 || baseline.mean_ns <= 0 {
+		// Every sample of the baseline was clamped to 0, so it has no time to compare with.
+		// Its allocation counts are exact all the same.
+		return Baseline_Diff{has_baseline = false, allocs_grew = allocs_grew}
 	}
 
 	delta_median := ((current.p50_ns - baseline.p50_ns) / baseline.p50_ns) * 100.0
@@ -745,16 +761,6 @@ compare_baseline :: proc(
 		improvement = moved && delta_median < 0
 	}
 	significant := regression || improvement
-
-	// Per-operation counts are a count divided by the iterations, so allow for rounding.
-	grew :: proc(current, baseline: f64) -> bool {
-		return current > baseline + max(1e-9, abs(baseline) * 1e-9)
-	}
-	allocs_grew :=
-		grew(current.allocs_per_op, baseline.allocs_per_op) ||
-		grew(current.alloc_bytes_per_op, baseline.alloc_bytes_per_op) ||
-		grew(current.temp_allocs_per_op, baseline.temp_allocs_per_op) ||
-		grew(current.temp_bytes_per_op, baseline.temp_bytes_per_op)
 
 	return Baseline_Diff {
 		has_baseline = true,
