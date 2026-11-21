@@ -41,6 +41,7 @@ Ref_Pair :: struct {
 	hl_shift_pct:      f64,
 	hl_low_pct:        f64,
 	hl_high_pct:       f64,
+	hl_too_few:        bool,
 	rank_significant:  bool,
 	welch_significant: bool,
 }
@@ -234,6 +235,14 @@ test_comparisons_match_scipy :: proc(t: ^testing.T) {
 				h[1],
 			)
 		}
+		testing.expectf(
+			t,
+			diff.too_few_samples == pr.hl_too_few,
+			"pair %d: too few samples %v, reference %v",
+			i,
+			diff.too_few_samples,
+			pr.hl_too_few,
+		)
 		testing.expectf(
 			t,
 			diff.rank_test && diff.is_significant == pr.rank_significant,

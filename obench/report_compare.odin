@@ -22,6 +22,9 @@ Comparison_Summary :: struct {
 	errored:                 int,
 	// Matched benchmarks whose heap or temp allocations or bytes per operation went up.
 	alloc_regressions:       int,
+	// Matched benchmarks with too few processes or samples a side for a 95% interval
+	// (`Baseline_Diff.too_few_samples`). They count as `unchanged`, since nothing was decided.
+	undecided:               int,
 	geomean_delta_pct:       f64,
 	// How many of the matched benchmarks the noise between samples would flag on average, at
 	// most: each interval has a 5% chance of missing the true change. A machine that ran at
@@ -125,6 +128,9 @@ compare_documents :: proc(
 		if diff.allocs_grew {
 			summary.alloc_regressions += 1
 		}
+		if diff.too_few_samples {
+			summary.undecided += 1
+		}
 		if ratio := 1.0 + diff.delta_median_pct / 100.0; diff.has_baseline && ratio > 0 {
 			ratio_log_sum += math.ln(ratio)
 			ratio_count += 1
@@ -158,7 +164,7 @@ compare_documents :: proc(
 	if ratio_count > 0 {
 		summary.geomean_delta_pct = (math.exp(ratio_log_sum / f64(ratio_count)) - 1.0) * 100.0
 	}
-	summary.expected_false_alarms = 0.05 * f64(summary.matched)
+	summary.expected_false_alarms = 0.05 * f64(summary.matched - summary.undecided)
 	return out[:], summary
 }
 
@@ -168,11 +174,18 @@ _row_name :: proc(r: Comparison_Row, several_suites: bool) -> string {
 	return several_suites ? fmt.tprintf("%s/%s", r.suite_name, r.full_name) : r.full_name
 }
 
-// `[+1.2%, +3.4%] p=0.0123`, the 95% interval of the shift and the Mann-Whitney U p-value, or
+// `[+1.2%, +3.4%] p=0.0123`, the 95% interval of the shift and the Mann-Whitney U p-value,
+// `+1.2% to +3.4%, too few for 95%` when there are too few values for an interval, or
 // `|t|=2.31` for Welch's t-test when a report has no samples.
 @(private = "file")
 _significance :: proc(diff: Baseline_Diff) -> string {
 	switch {
+	case diff.too_few_samples:
+		return fmt.tprintf(
+			"%+.1f%% to %+.1f%%, too few for 95%%",
+			diff.shift_low_pct,
+			diff.shift_high_pct,
+		)
 	case diff.rank_test:
 		return fmt.tprintf(
 			"[%+.1f%%, %+.1f%%] p=%.4f",
@@ -329,6 +342,15 @@ write_comparison :: proc(
 			p.reset,
 		)
 	}
+	if summary.undecided > 0 {
+		fmt.wprintf(
+			w,
+			"%s%d benchmark(s) have too few processes a side for a 95%% interval, so nothing was decided for them: run 4 or more on both sides%s\n",
+			p.red,
+			summary.undecided,
+			p.reset,
+		)
+	}
 	if summary.alloc_regressions > 0 {
 		fmt.wprintf(
 			w,
@@ -411,6 +433,14 @@ write_comparison_markdown :: proc(
 			"- The baseline counted allocations %s and the candidate %s, so the times of benchmarks that allocate can't be compared.\n",
 			_alloc_counting_string(baseline.untimed_allocs),
 			_alloc_counting_string(candidate.untimed_allocs),
+		)
+		warned = true
+	}
+	if summary.undecided > 0 {
+		fmt.wprintf(
+			w,
+			"- %d benchmark(s) have too few processes a side for a 95%% interval, so nothing was decided for them. Run 4 or more on both sides.\n",
+			summary.undecided,
 		)
 		warned = true
 	}
@@ -507,6 +537,7 @@ _JSON_Comparison_Row :: struct {
 	shift_pct:             f64 `json:"shift_pct"`, // Hodges-Lehmann shift, with its 95% interval
 	shift_low_pct:         f64 `json:"shift_low_pct"`,
 	shift_high_pct:        f64 `json:"shift_high_pct"`,
+	too_few_samples:       bool `json:"too_few_samples"`, // no 95% interval, so nothing was decided
 	baseline_bytes_per_op: f64 `json:"baseline_bytes_per_op"`,
 	current_bytes_per_op:  f64 `json:"current_bytes_per_op"`,
 	delta_bytes_pct:       f64 `json:"delta_bytes_pct"`,
@@ -566,6 +597,7 @@ write_comparison_json :: proc(
 		o.shift_pct = r.diff.shift_pct
 		o.shift_low_pct = r.diff.shift_low_pct
 		o.shift_high_pct = r.diff.shift_high_pct
+		o.too_few_samples = r.diff.too_few_samples
 		o.current_bytes_per_op = r.current_bytes_per_op
 		o.delta_bytes_pct = r.diff.delta_bytes_pct
 		o.allocs_grew = r.diff.allocs_grew
@@ -602,6 +634,9 @@ it (see `suite_exit_code` for a run):
   `fail_on_regression` is set and they come from builds with a different optimization mode,
   OS, or architecture, or counted allocations differently while the baseline has a benchmark
   that allocates. Time regressions don't count then, since the times can't be compared.
+  Also when `fail_on_regression` is set, nothing regressed, and a benchmark has too few
+  processes a side for a 95% interval (`Comparison_Summary.undecided`): the gate checked
+  nothing for it.
 - `EXIT_SUCCESS` (0) otherwise, and always without a gate
 
 Benchmarks missing from one side are listed but don't fail the comparison, as long as some
@@ -627,6 +662,9 @@ comparison_exit_code :: proc "contextless" (
 	}
 	if fail_on_regression && summary.regressions > 0 {
 		return EXIT_FAILURE
+	}
+	if fail_on_regression && summary.undecided > 0 {
+		return EXIT_BASELINE
 	}
 	return EXIT_SUCCESS
 }

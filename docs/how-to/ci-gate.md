@@ -16,7 +16,7 @@ obench --count 5 --save-baseline main.json
 obench --count 5 --baseline main.json --fail-on-regression
 ```
 
-`--count 5` runs every package in five processes, each with a different memory layout, and keeps the median of each process. When both the baseline and the run come from at least two processes, the gate compares those medians, so it only fails on a change that holds across processes. The same four runs of `examples/lookup` with `--count 5` flagged none of the 144 comparisons. It takes five times as long. `--count` writes `--json`, `--save-baseline`, and `--html`, but not `--md`, `--csv`, or `--spall`.
+`--count 5` runs every package in five processes, each with a different memory layout, and keeps the median of each process. When both the baseline and the run come from at least two processes, the gate compares those medians, so it only fails on a change that holds across processes. Use at least 4 processes on both sides. With fewer, a comparison can be left without a 95% interval, and then it decides nothing. The same four runs of `examples/lookup` with `--count 5` flagged none of the 144 comparisons. It takes five times as long. `--count` writes `--json`, `--save-baseline`, and `--html`, but not `--md`, `--csv`, or `--spall`.
 
 ## Run both sides on the same machine
 
@@ -27,7 +27,7 @@ git worktree add ../main origin/main
 obench ab ../main . --fail-on-regression
 ```
 
-It runs 6 rounds by default (`--rounds`), each side once per round in its own process. Keep at least 6: with 4 or fewer, the interval of the change covers every difference between the two sides' processes, so it's too wide to flag anything but a large change. On an M2, `ab` of a package against itself measured +0.06%, and against a copy that did 10% more work, +10.47%, which failed the gate.
+It runs 6 rounds by default (`--rounds`), each side once per round in its own process. Keep at least 6. With 4 a side the interval of the change already runs from the smallest to the largest difference between the two sides' processes, so it only flags a large change. With 2 or 3 a side there is no 95% interval at all: the comparison decides nothing and says so, and a gate ends with status 3. On an M2, `ab` of a package against itself measured +0.06%, and against a copy that did 10% more work, +10.47%, which failed the gate.
 
 In GitHub Actions, the checkout needs the history of `main` for the worktree. A sketch, with obench already built or downloaded onto `PATH`:
 
@@ -48,7 +48,7 @@ In GitHub Actions, the checkout needs the history of `main` for the worktree. A 
 | 2 | a usage error, like an unknown option |
 | 3 | the baseline can't be compared with this run, so save it again |
 
-Status 3 means the baseline holds none of the run's benchmarks, was built with another optimization mode, OS, architecture, `-microarch`, or bounds-check setting, or counted allocations the other way. A run that ends with 3 still writes `--save-baseline`, so a job can replace the old baseline instead of failing:
+Status 3 means the baseline holds none of the run's benchmarks, was built with another optimization mode, OS, architecture, `-microarch`, or bounds-check setting, or counted allocations the other way. It also means that a side has too few processes for the gate to decide, which `--count 4` or more on both sides fixes. A run that ends with 3 still writes `--save-baseline`, so a job can replace the old baseline instead of failing:
 
 ```sh
 set +e

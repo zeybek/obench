@@ -125,7 +125,8 @@ USAGE:
                                         Compare several reports per side, combined
   obench ab <baseline dir> <candidate dir> [--rounds 6]
                                         Build both, run them alternately in random order,
-                                        and compare the two sides on this machine
+                                        and compare the two sides on this machine (it takes
+                                        4 or more rounds to decide)
   obench export --format <format> <report.json>
                                         Convert a JSON report for other tools: bmf (Bencher),
                                         gab (github-action-benchmark), gbench (Google
@@ -164,7 +165,8 @@ RUN OPTIONS:
       --counters                 Linux: instructions, IPC, branch and cache misses per op,
                                  where the kernel allows perf_event_open
       --count <processes>        Run every package in this many processes and compare their
-                                 medians (default: 1); see "Repeating runs" in the docs
+                                 medians (default: 1). A comparison needs 4 or more on both
+                                 sides to decide; see "Repeating runs" in the docs
       --instructions             Count instructions per op exactly under Valgrind's
                                  Cachegrind (Linux), with --batch-size iterations (default
                                  100) and twice that; --json, --save-baseline, --baseline,
@@ -212,7 +214,7 @@ The compiler is taken from $ODIN when set, otherwise 'odin' on PATH.
 Exit status: 0 success, 1 benchmark/regression/build failure, a baseline file that can't be
 read, or an unparsable *_bench.odin package, 2 usage error (also a short flag together with its
 long form, like -n and --samples), 3 a baseline that can't be compared with the run (save it
-again).
+again), or a gate with too few processes a side to decide.
 `,
 		obench.VERSION,
 	)
@@ -2331,6 +2333,9 @@ main :: proc() {
 		return
 
 	case .AB:
+		if warning := few_processes_warning("--rounds", opts.rounds); warning != "" {
+			fmt.eprintfln("obench: warning: %s", warning)
+		}
 		if code := run_ab(opts); code != 0 {
 			os.exit(code)
 		}
@@ -2387,6 +2392,9 @@ main :: proc() {
 	} else if opts.instructions {
 		code = run_instructions(packages[:], opts)
 	} else {
+		if warning := few_processes_warning("--count", opts.count); warning != "" {
+			fmt.eprintfln("obench: warning: %s", warning)
+		}
 		code = run_all(packages[:], opts)
 	}
 	// The other packages ran, but a benchmark package that doesn't parse must not pass a gate.

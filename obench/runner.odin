@@ -656,7 +656,8 @@ Exit status for a program that ran `s`, as the CLI's generated runner uses it:
   to save again.
 - `EXIT_BASELINE` (3) when the baseline was read but can't be compared with this run: it was
   built with another optimization mode, OS, or architecture, counted allocations the other
-  way, or holds none of the suite's benchmarks
+  way, holds none of the suite's benchmarks, or leaves a benchmark with too few samples on a
+  side for a 95% interval (`Baseline_Diff.too_few_samples`)
 
 Time regressions against a baseline that can't be compared don't count, since its times mean
 nothing for this run, but a failed benchmark or a growth in allocations still gives 1. A CI
@@ -925,6 +926,27 @@ _suite_execute :: proc(s: ^Suite) -> bool {
 		}
 	}
 
+	// Too few samples on a side for a 95% interval decide nothing, so a regression gate would
+	// pass those benchmarks without checking them.
+	if baseline_loaded {
+		undecided := 0
+		for &r in s.results {
+			if r.diff.too_few_samples {
+				undecided += 1
+			}
+		}
+		if undecided > 0 {
+			fmt.eprintfln(
+				"obench: warning: %d benchmark(s) have too few samples in baseline '%s' or in this run for a 95%% interval, so nothing was decided for them",
+				undecided,
+				s.config.baseline_load_path,
+			)
+			if s.config.fail_on_regression {
+				s.failed_baseline += 1
+			}
+		}
+	}
+
 	if len(s.results) > 0 && !s.config.test_mode {
 		s.empty_loop_ns = _time_empty_loop(s, &temp_arena)
 	}
@@ -1049,6 +1071,9 @@ _time_empty_loop :: proc(s: ^Suite, temp_arena: ^runtime.Arena) -> f64 {
 	s.config.sample_count = min(s.config.sample_count, 20)
 	s.config.warmup_time = min(s.config.warmup_time, 10 * time.Millisecond)
 	s.config.enforce_zero_allocs = false
+	// `fixed_batch_size` is for the benchmarks: a small one would leave the loop a tick or two
+	// of the clock per sample.
+	s.config.fixed_batch_size = 0
 
 	no_baseline: map[string]Stats
 	no_trace: Spall_Recorder
