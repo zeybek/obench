@@ -1062,8 +1062,18 @@ _empty_step :: proc(b: ^Bencher) {
 	}
 }
 
-// Times an empty `step` loop with the suite's settings, at most 20 samples, and returns its
-// median time per iteration, or 0 if it failed.
+@(private = "file")
+_black_box_step :: proc(b: ^Bencher) {
+	for step(b) {
+		_ = black_box(0)
+	}
+}
+
+// Times an empty `step` loop, and the same loop with a `black_box` in its body, with the
+// suite's settings and at most 20 samples each. Returns the lower of the two median times per
+// iteration, or 0 if both failed. The empty loop isn't always the faster one: every iteration
+// loads the counter that the iteration before stored, and on some CPUs (an Apple M2 for one)
+// that costs more when nothing else sits between the store and the load.
 @(private = "file")
 _time_empty_loop :: proc(s: ^Suite, temp_arena: ^runtime.Arena) -> f64 {
 	saved := s.config
@@ -1077,23 +1087,26 @@ _time_empty_loop :: proc(s: ^Suite, temp_arena: ^runtime.Arena) -> f64 {
 
 	no_baseline: map[string]Stats
 	no_trace: Spall_Recorder
-	res := _execute_entry(
-		s,
-		"",
-		Entry{name = "empty loop", procedure = _empty_step},
-		0,
-		false,
-		1,
-		false,
-		no_baseline,
-		&no_trace,
-		temp_arena,
-	)
-	defer _destroy_result(s, &res)
-	if res.error != .None {
-		return 0
+	floor: f64 = 0
+	for procedure in ([2]Bench_Proc{_empty_step, _black_box_step}) {
+		res := _execute_entry(
+			s,
+			"",
+			Entry{name = "empty loop", procedure = procedure},
+			0,
+			false,
+			1,
+			false,
+			no_baseline,
+			&no_trace,
+			temp_arena,
+		)
+		if res.error == .None && res.stats.p50_ns > 0 && (floor == 0 || res.stats.p50_ns < floor) {
+			floor = res.stats.p50_ns
+		}
+		_destroy_result(s, &res)
 	}
-	return res.stats.p50_ns
+	return floor
 }
 
 // `Config.count_iterations`: runs every selected benchmark with one iteration, which checks

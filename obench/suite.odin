@@ -72,9 +72,9 @@ Suite :: struct {
 	failed_baseline:          int,
 	// The machine's state when the suite last ran (see `read_machine_state`).
 	machine_state:            Machine_State,
-	// Time per iteration of an empty `for step(b) {}` loop, timed after the benchmarks. A
-	// result near it most likely had its work optimized away. 0 when nothing ran or with
-	// `Config.test_mode`.
+	// Time per iteration of the `step` loop itself, timed after the benchmarks: the faster of
+	// an empty `for step(b) {}` loop and one with a `black_box` in its body. A result near it
+	// most likely had its work optimized away. 0 when nothing ran or with `Config.test_mode`.
 	empty_loop_ns:            f64,
 	// Why `Config.counters` gave no hardware counters, like "perf_event_open failed with
 	// EACCES"; "" when it did or wasn't set.
