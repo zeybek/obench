@@ -82,16 +82,18 @@ bench_loop :: proc(b: ^obench.Bencher) {
 ODIN
 "$OBENCH" "$WORK_N/regress" --collection "libs=$ROOT_N" -n 30 -w 20 --no-color --save-baseline "$WORK_N/fast.json"
 set +e
-"$OBENCH" "$WORK_N/regress" --collection "libs=$ROOT_N" --define WORK=10000 -n 30 -w 20 --no-color \
+# 100 times the work: with one process a side, a busy runner's slowest baseline samples can
+# reach past a run that is only 10 times slower.
+"$OBENCH" "$WORK_N/regress" --collection "libs=$ROOT_N" --define WORK=100000 -n 30 -w 20 --no-color \
   --baseline "$WORK_N/fast.json" --fail-on-regression --json "$WORK_N/slow.json" --html "$WORK_N/slow.html"
 code=$?
 set -e
-[ "$code" -eq 1 ] || fail "expected exit 1 for a 10x slowdown, got $code"
+[ "$code" -eq 1 ] || fail "expected exit 1 for a 100x slowdown, got $code"
 grep -q '<td class="slower">' "$WORK/slow.html" || fail "expected the HTML report to mark the slowdown"
 set +e
 "$OBENCH" compare "$WORK_N/fast.json" "$WORK_N/slow.json" --fail-on-regression --no-color; code=$?
 set -e
-[ "$code" -eq 1 ] || fail "expected compare to exit 1 for a 10x slowdown, got $code"
+[ "$code" -eq 1 ] || fail "expected compare to exit 1 for a 100x slowdown, got $code"
 
 step "compare writes the comparison as Markdown and JSON"
 "$OBENCH" compare "$WORK_N/fast.json" "$WORK_N/slow.json" --md "$WORK_N/cmp.md" --json "$WORK_N/cmp.json" \

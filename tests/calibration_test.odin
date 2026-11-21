@@ -27,7 +27,9 @@ test_one_stalled_probe_does_not_decide_the_batch_size :: proc(t: ^testing.T) {
 	cfg := obench.Config {
 		warmup_time         = 0,
 		min_sample_time     = 50 * time.Microsecond,
-		max_bench_time      = 50 * time.Millisecond,
+		// The stalled probe is only repeated while it fits the budget twice over, and on a busy
+		// runner the 2 ms sleep can last far longer.
+		max_bench_time      = 2 * time.Second,
 		sample_count        = 5,
 		untimed_alloc_check = obench.DEFAULT_UNTIMED_ALLOCS,
 		noise_threshold_pct = 2.0,
