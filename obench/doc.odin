@@ -371,6 +371,15 @@ Compile-time defaults can be changed with `-define`:
 	// Default Spall trace output path (empty disables tracing unless set in Config).
 	DEFAULT_SPALL_PATH    : string : #config(OBENCH_SPALL_PATH,    "")
 
+Stability
+
+Not everything this package exports is promised to stay. The stable part is what a benchmark
+calls, what builds and runs a suite, and the types a suite's results are made of. STABILITY.md
+in the repository lists it. The rest (the statistics, the report readers and writers, the
+counting allocator, the clock, the hardware counters, and the formatting helpers) is exported
+for the CLI and the tests, since Odin can't export a name to some packages only, and it can
+change in any release.
+
 Limits
 
 - Without `--count`, significance is computed from samples taken in one process, and two
