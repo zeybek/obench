@@ -1,6 +1,8 @@
 package obench_tests
 
 import obench "../obench"
+import "core:mem"
+import "core:os"
 import "core:testing"
 
 @(private = "file")
@@ -93,4 +95,39 @@ test_combine_runs_carries_the_processes_of_combined_reports :: proc(t: ^testing.
 	testing.expect_value(t, medians[0], 10.0)
 	testing.expect_value(t, medians[1], 12.0)
 	testing.expect_value(t, medians[2], 11.0)
+}
+
+// The report is read into the temp allocator, so the map has to own everything it keeps.
+@(test)
+test_load_baseline_file_owns_the_process_medians :: proc(t: ^testing.T) {
+	path := ".obench_test_process_medians_baseline.json"
+	defer _ = os.remove(path)
+	report := `{"format_version": 6, "suite_name": "s", "processes": 2, "benchmarks": [{
+		"suite_name": "s", "full_name": "x", "samples": 4, "p50_ns": 100.5, "mean_ns": 100.5,
+		"samples_ns": [100, 101, 100, 101], "process_medians_ns": [100, 101]}]}`
+	if !testing.expect_value(t, os.write_entire_file(path, report), nil) {
+		return
+	}
+
+	baseline := make(map[string]obench.Stats)
+	defer obench.destroy_baseline_map(&baseline, context.allocator)
+	if !testing.expect_value(
+		t,
+		obench.load_baseline_file(path, &baseline, context.allocator),
+		nil,
+	) {
+		return
+	}
+
+	// The caller frees its temporary memory and uses it for something else.
+	free_all(context.temp_allocator)
+	scratch := make([]u8, 64 * mem.Kilobyte, context.temp_allocator)
+	mem.set(raw_data(scratch), 0xFF, len(scratch))
+
+	medians := baseline["x"].process_medians_ns
+	if testing.expect_value(t, len(medians), 2) {
+		testing.expect_value(t, medians[0], 100.0)
+		testing.expect_value(t, medians[1], 101.0)
+	}
+	free_all(context.temp_allocator)
 }

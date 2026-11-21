@@ -55,6 +55,7 @@ Ref_Complexity :: struct {
 	intercept:   f64,
 	nrmse:       f64,
 	r_squared:   f64,
+	also_fits:   string,
 }
 
 @(private = "file")
@@ -282,6 +283,15 @@ test_complexity_fits_match_numpy :: proc(t: ^testing.T) {
 		if !testing.expectf(t, got == c.class, "case %d: %s, numpy %s", i, got, c.class) {
 			continue
 		}
+		also := fmt.tprint(est.also_fits)
+		testing.expectf(
+			t,
+			also == c.also_fits,
+			"case %d: also fits %s, numpy %s",
+			i,
+			also,
+			c.also_fits,
+		)
 		mean_t: f64 = 0
 		for v in c.times {
 			mean_t += v

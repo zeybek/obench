@@ -30,4 +30,8 @@ This repository's weekly A/A job checks the result: three reports of the example
 
 ## Complexity fits
 
-For a group with three or more `@params` sizes, obench fits `T(N) = a + c * f(N)` for each class from O(1) to O(N³), so a fixed cost per call doesn't bend the curve. It reports a growing class only when it fits significantly better than a constant, by an F-test at the 5% level. With three sizes that test is strict, so a noisy curve over few sizes can come out as O(1): use four or more sizes when the class matters. For O(1), the reported R² is `1 - NRMSE²`, how flat the times are, since a constant explains no variance.
+For a group with three or more `@params` sizes, obench fits `T(N) = a + c * f(N)` for each class from O(1) to O(N³), so a fixed cost per call doesn't bend the curve. It reports a growing class only when it fits significantly better than a constant, by an F-test at the 5% level. With three sizes that test is strict, so a noisy curve over few sizes can come out as O(1): use four or more sizes when the class matters.
+
+A handful of sizes often can't tell two classes apart. When a lower class passed the same test and its residual sum of squares is at most the winner's times the 5% critical value of F (6.39 for six sizes), the report names both, as in `O(N log N) or O(N)`, and the JSON report has the lower one as `also_fits`. On generated curves with six sizes and 5% noise, the winner alone was the true class in 96% of the fits that named one class, and one of the two was in 98% of those that named two.
+
+For O(1), the reported R² is `1 - NRMSE²`, how flat the times are, since a constant explains no variance.

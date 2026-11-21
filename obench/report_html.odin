@@ -375,9 +375,10 @@ _html_complexity :: proc(w: io.Writer, doc: Export_Document, c: Export_Complexit
 	name := c.group_name != "" ? fmt.tprintf("%s::%s", c.group_name, c.bench_name) : c.bench_name
 	fmt.wprintf(
 		w,
-		"<div class=\"chart\"><p class=\"note\">%s: %s (R² %.3f), median time against N</p>",
+		"<div class=\"chart\"><p class=\"note\">%s: %s%s (R² %.3f), median time against N</p>",
 		_html(name),
 		_html(c.complexity),
+		c.also_fits != "" ? fmt.tprintf(" or %s", _html(c.also_fits)) : "",
 		c.r_squared,
 	)
 	fmt.wprintf(

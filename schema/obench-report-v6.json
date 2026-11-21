@@ -150,7 +150,8 @@
         "coefficient": { "type": "number" },
         "intercept": { "type": "number" },
         "r_squared": { "type": "number" },
-        "nrmse": { "type": "number" }
+        "nrmse": { "type": "number" },
+        "also_fits": { "type": "string", "description": "The lowest class below complexity that fits the same points about as well, left out when there is none" }
       }
     }
   }

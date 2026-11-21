@@ -385,7 +385,9 @@ Limits
 - The Big-O fit tries `T(N) = a + c * f(N)` for each class, so a fixed cost per call doesn't
   bend the curve, and only reports a growing class when it fits significantly better than a
   constant (an F-test at the 5% level). With 3 sizes that test is strict, so a noisy curve
-  over few sizes can come out as O(1). Use 4 or more sizes when the class matters. For O(1)
+  over few sizes can come out as O(1). Use 4 or more sizes when the class matters. When a
+  lower class fits the same points about as well, the report names both, as in
+  `O(N log N) or O(N)`: the points can't tell them apart. For O(1)
   the reported R² is 1 - NRMSE², how flat the times are, since a constant explains no
   variance.
 - Spall traces begin and end spans with `core:prof/spall`'s `_buffer_begin` and

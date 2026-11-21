@@ -318,6 +318,40 @@ test_bigo_with_a_constant_cost :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_bigo_names_a_lower_class_that_fits_too :: proc(t: ^testing.T) {
+	// Medians of core:strings.prefix_length on an M2, which is linear. O(N log N) has the
+	// lowest error (NRMSE 4.4% against 9.2%), but six points can't tell the two apart: the
+	// residuals of O(N) are 4.3 times larger, under the critical value of 6.39.
+	sizes := []int{7, 16, 64, 256, 1024, 4096}
+	medians := []f64{6.07, 4.75, 5.73, 7.58, 16.71, 69.27}
+	est, ok := obench.estimate_complexity("grp", "prefix_length", sizes, medians)
+	testing.expect(t, ok)
+	testing.expect_value(t, est.best_class, obench.Complexity_Class.O_N_Log_N)
+	testing.expect_value(t, est.also_fits, obench.Complexity_Class.O_N)
+
+	// A curve that really is N log N has no lower class that fits: O(N) is far worse.
+	params := []int{16, 64, 256, 1024, 4096, 16384}
+	times := make([]f64, len(params), context.temp_allocator)
+	for p, i in params {
+		times[i] = 20 + 0.5 * f64(p) * math.log2(f64(p))
+	}
+	nlogn, nlogn_ok := obench.estimate_complexity("grp", "n_log_n", params, times)
+	testing.expect(t, nlogn_ok)
+	testing.expect_value(t, nlogn.best_class, obench.Complexity_Class.O_N_Log_N)
+	testing.expect_value(t, nlogn.also_fits, obench.Complexity_Class.None)
+
+	// The JSON report carries both classes.
+	s := obench.suite_create("also_fits", quick_config())
+	defer obench.suite_destroy(&s)
+	append(&s.complexities, est)
+	doc := obench.export_document(&s, context.temp_allocator)
+	if testing.expect_value(t, len(doc.complexities), 1) {
+		testing.expect_value(t, doc.complexities[0].complexity, "O(N log N)")
+		testing.expect_value(t, doc.complexities[0].also_fits, "O(N)")
+	}
+}
+
+@(test)
 test_clock_overhead_is_measured :: proc(t: ^testing.T) {
 	// Two clock reads always cost something, even when the clock ticks too coarsely to
 	// see a single pair.
