@@ -122,7 +122,8 @@ Stats :: struct {
 	// Every sample's batch time with the clock overhead subtracted, rounded to the nearest
 	// nanosecond and not divided by `batch_size`. `compute_stats` leaves it `nil`. The suite
 	// keeps its own copy in each `Result`, and `load_baseline_file` allocates one per entry
-	// when valid. Empty for reports written before format version 5.
+	// when valid. Empty for reports written before format version 5, and for a report that
+	// combines processes that used different batch sizes (`combine_runs`).
 	samples_batch_ns:     []u64,
 }
 
