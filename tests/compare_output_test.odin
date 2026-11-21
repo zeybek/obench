@@ -137,3 +137,61 @@ test_compare_prints_the_interval_and_expected_false_alarms :: proc(t: ^testing.T
 	_, summary := obench.compare_documents(doc, doc, 2.0, context.temp_allocator)
 	testing.expect_value(t, summary.expected_false_alarms, 1.0)
 }
+
+// Reports from two processes each, the candidate about 5% slower in both.
+@(private = "file")
+_two_process_docs :: proc() -> (baseline, candidate: obench.Export_Document) {
+	entry :: proc(medians: []f64) -> []obench.Export_Entry {
+		entries := make([]obench.Export_Entry, 1, context.temp_allocator)
+		entries[0] = {
+			suite_name         = "s",
+			full_name          = "work",
+			samples            = len(medians),
+			p50_ns             = medians[0],
+			mean_ns            = medians[0],
+			samples_ns         = medians,
+			process_medians_ns = medians,
+		}
+		return entries
+	}
+	baseline = {
+		format_version = obench.REPORT_FORMAT_VERSION,
+		untimed_allocs = true,
+		processes      = 2,
+		benchmarks     = entry({100, 101}),
+	}
+	candidate = baseline
+	candidate.benchmarks = entry({105, 106})
+	return
+}
+
+@(test)
+test_compare_leaves_too_few_processes_undecided :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	baseline, candidate := _two_process_docs()
+
+	sb := strings.builder_make(context.temp_allocator)
+	summary := obench.write_comparison(strings.to_writer(&sb), baseline, candidate, 2.0, false)
+	out := strings.to_string(sb)
+	testing.expect_value(t, summary.matched, 1)
+	testing.expect_value(t, summary.undecided, 1)
+	testing.expect_value(t, summary.regressions, 0)
+	testing.expect_value(t, summary.unchanged, 1)
+	testing.expect(t, strings.contains(out, "too few for 95%"), out)
+	testing.expect(t, !strings.contains(out, "SLOWER"), out)
+	testing.expect(t, strings.contains(out, "run 4 or more on both sides"), out)
+
+	// A gate that could decide nothing didn't pass: it's the status for "can't be compared".
+	testing.expect_value(t, obench.comparison_exit_code(summary), obench.EXIT_SUCCESS)
+	testing.expect_value(
+		t,
+		obench.comparison_exit_code(summary, fail_on_regression = true),
+		obench.EXIT_BASELINE,
+	)
+
+	js := strings.builder_make(context.temp_allocator)
+	_, json_err := obench.write_comparison_json(strings.to_writer(&js), baseline, candidate, 2.0)
+	testing.expect_value(t, json_err, nil)
+	testing.expect(t, strings.contains(strings.to_string(js), `"too_few_samples": true`))
+	testing.expect(t, strings.contains(strings.to_string(js), `"verdict": "unchanged"`))
+}

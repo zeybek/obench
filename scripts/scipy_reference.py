@@ -133,15 +133,19 @@ def exact_u_cut(n, m):
 def hodges_lehmann(a, b):
     """Shift of `a` against `b` in percent with its 95% interval, the rule hodges_lehmann_shift
     documents: every pairwise log ratio, the exact U distribution up to 20 values a side, and
-    above that the normal approximation with autocorrelation-adjusted effective sizes. None
-    when a rounding difference could move the cut by one."""
+    above that the normal approximation with autocorrelation-adjusted effective sizes. The
+    last value says whether there is a 95% interval at all: with too few values no rank of the
+    exact distribution leaves 2.5% or less outside, and the smallest and the largest ratio are
+    returned in its place. None when a rounding difference could move the cut by one."""
     la = np.sort(np.log(np.maximum(a, 1e-6)))
     lb = np.sort(np.log(np.maximum(b, 1e-6)))
     d = np.sort(np.subtract.outer(la, lb).ravel())
     total, n, m = d.size, la.size, lb.size
     median = (d[(total - 1) // 2] + d[total // 2]) / 2
+    has_interval = True
     if n <= 20 and m <= 20:
         k = exact_u_cut(n, m)
+        has_interval = k >= 1
     else:
         def effective(count, r):
             r = min(max(r, 0.0), 0.95)
@@ -154,7 +158,7 @@ def hodges_lehmann(a, b):
         k = math.floor(x)
     k = min(max(k, 1), total // 2)
     pct = lambda v: (math.exp(v) - 1) * 100
-    return pct(median), pct(d[k - 1]), pct(d[total - k])
+    return pct(median), pct(d[k - 1]), pct(d[total - k]), has_interval
 
 
 def pair_entry(a, b):
@@ -176,7 +180,7 @@ def pair_entry(a, b):
     hl = hodges_lehmann(a, b)
     if hl is None:
         return None
-    hl_shift, hl_low, hl_high = hl
+    hl_shift, hl_low, hl_high, hl_has_interval = hl
     if abs(hl_low - NOISE_THRESHOLD_PCT) < MARGIN * NOISE_THRESHOLD_PCT:
         return None
     if abs(hl_high + NOISE_THRESHOLD_PCT) < MARGIN * NOISE_THRESHOLD_PCT:
@@ -191,8 +195,11 @@ def pair_entry(a, b):
         "hl_shift_pct": hl_shift,
         "hl_low_pct": hl_low,
         "hl_high_pct": hl_high,
+        "hl_too_few": not hl_has_interval,
         # The whole 95% interval of the shift lies beyond the threshold.
-        "rank_significant": bool(hl_low > NOISE_THRESHOLD_PCT or hl_high < -NOISE_THRESHOLD_PCT),
+        "rank_significant": bool(
+            hl_has_interval and (hl_low > NOISE_THRESHOLD_PCT or hl_high < -NOISE_THRESHOLD_PCT)
+        ),
         "welch_significant": bool(abs(welch.statistic) >= t_crit and abs(delta) >= NOISE_THRESHOLD_PCT),
     }
 

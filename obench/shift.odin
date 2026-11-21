@@ -111,7 +111,13 @@ Up to 20 samples a side use the exact distribution of U, and more use its normal
 approximation. Samples are rarely independent, since one slow stretch of the machine covers
 several of them, so with `adjust_for_autocorrelation` the normal approximation uses each
 side's effective sample count, n(1 - r)/(1 + r) for a positive lag-1 autocorrelation r, which
-widens the interval. `ok` is false with fewer than two samples on a side.
+widens the interval.
+
+`ok` is false when the samples can't give a 95% interval: with fewer than two on a side, or
+with so few that even the smallest and the largest ratio leave more than 2.5% of the exact
+distribution outside on each side, as with 2 samples against up to 7, or 3 against 3 or 4.
+From 4 a side there is one. The estimate, the smallest ratio, and the largest ratio are still
+returned then, but they aren't an interval to decide on.
 
 Copies of the samples are sorted with `allocator`.
 */
@@ -164,8 +170,12 @@ hodges_lehmann_shift :: proc(
 
 	// `k` differences on each side fall outside the interval: [D(k), D(N - k + 1)], 1-indexed.
 	k: int
+	too_few := false
 	if len(tx) <= EXACT_U_LIMIT && len(ty) <= EXACT_U_LIMIT {
 		k = _exact_u_cut(len(tx), len(ty), allocator)
+		// No rank leaves 2.5% or less outside: the whole range is all there is, and it covers
+		// less than 95%.
+		too_few = k < 1
 	} else {
 		ne, me := f64(len(tx)), f64(len(ty))
 		if adjust_for_autocorrelation {
@@ -184,5 +194,5 @@ hodges_lehmann_shift :: proc(
 	pct :: proc(log_ratio: f64) -> f64 {
 		return (math.exp(log_ratio) - 1) * 100
 	}
-	return pct(median), pct(diffs[k - 1]), pct(diffs[total - k]), true
+	return pct(median), pct(diffs[k - 1]), pct(diffs[total - k]), !too_few
 }

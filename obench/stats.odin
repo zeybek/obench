@@ -144,6 +144,11 @@ Baseline_Diff :: struct {
 	shift_pct:        f64,
 	shift_low_pct:    f64,
 	shift_high_pct:   f64,
+	// With `rank_test`: a side has too few values for a 95% interval (see
+	// `hodges_lehmann_shift`), so nothing is decided. `is_significant`, `is_regression`, and
+	// `is_improvement` stay false, and `shift_low_pct` and `shift_high_pct` hold the smallest
+	// and the largest ratio.
+	too_few_samples:  bool,
 	is_significant:   bool,
 	is_regression:    bool,
 	is_improvement:   bool,
@@ -647,7 +652,9 @@ of the typical sample with its 95% confidence interval (see `hodges_lehmann_shif
 counts as a regression only when the whole interval lies above `noise_threshold_pct` percent
 (e.g. `2.0` for 2%), as an improvement only when it lies below the negative threshold. A
 shift that could still be smaller than the threshold isn't flagged, however small its
-p-value. The Mann-Whitney U p-value is still filled in for the report. Without samples, as
+p-value. The Mann-Whitney U p-value is still filled in for the report. With too few samples
+on a side for a 95% interval, as with 2 or 3 process medians against as many, nothing is
+flagged and `too_few_samples` is set. Without samples, as
 for reports written before format version 3, the change is significant when Welch's t-test
 on the means finds a difference at the 5% level and the median moved by at least the
 threshold.
@@ -706,16 +713,18 @@ compare_baseline :: proc(
 	rank_test := len(cur_samples) >= 2 && len(base_samples) >= 2
 	p_value: f64 = 1
 	shift, shift_low, shift_high: f64
-	regression, improvement: bool
+	regression, improvement, too_few: bool
 	if rank_test {
 		_, _, p_value = mann_whitney_u(cur_samples, base_samples, allocator)
-		shift, shift_low, shift_high, _ = hodges_lehmann_shift(
+		has_interval: bool
+		shift, shift_low, shift_high, has_interval = hodges_lehmann_shift(
 			cur_samples,
 			base_samples,
 			allocator = allocator,
 		)
-		regression = shift_low > noise_threshold_pct
-		improvement = shift_high < -noise_threshold_pct
+		too_few = !has_interval
+		regression = has_interval && shift_low > noise_threshold_pct
+		improvement = has_interval && shift_high < -noise_threshold_pct
 	} else {
 		samples_differ := welch_df > 0 && abs(welch_t) >= t_critical_975(welch_df)
 		moved := samples_differ && abs(delta_median) >= noise_threshold_pct
@@ -747,6 +756,7 @@ compare_baseline :: proc(
 		shift_pct = shift,
 		shift_low_pct = shift_low,
 		shift_high_pct = shift_high,
+		too_few_samples = too_few,
 		is_significant = significant,
 		is_regression = regression,
 		is_improvement = improvement,

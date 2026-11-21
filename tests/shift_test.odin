@@ -196,3 +196,61 @@ test_regression_needs_the_whole_interval_above_the_threshold :: proc(t: ^testing
 	testing.expect(t, diff.shift_high_pct < -2.0)
 	testing.expect(t, diff.is_improvement)
 }
+
+// With 2 samples against 2, the two sides are completely apart in 2 of the 6 possible orders,
+// so even the smallest and the largest ratio cover only 67%. There is a 95% interval once
+// the smallest tail of the exact distribution is 2.5% or less: 1/70 for 4 against 4.
+@(test)
+test_too_few_samples_have_no_interval :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	base := []f64{100, 101, 102, 103, 104, 105, 106, 107}
+	slower := []f64{110, 111, 112, 113, 114, 115, 116, 117}
+	cases := []struct {
+		n, m:         int,
+		has_interval: bool,
+	} {
+		{2, 2, false},
+		{3, 3, false},
+		{2, 7, false},
+		{3, 4, false},
+		{4, 4, true},
+		{2, 8, true},
+		{3, 5, true},
+		{8, 8, true},
+	}
+	for c in cases {
+		_, low, high, ok := obench.hodges_lehmann_shift(slower[:c.n], base[:c.m])
+		testing.expectf(t, ok == c.has_interval, "%d against %d: ok is %v", c.n, c.m, ok)
+		testing.expectf(t, low > 0 && high > low, "%d against %d: %v to %v", c.n, c.m, low, high)
+	}
+}
+
+@(private = "file")
+_process_stats :: proc(medians: []f64) -> obench.Stats {
+	return obench.Stats {
+		samples = len(medians),
+		p50_ns = medians[len(medians) / 2],
+		mean_ns = medians[len(medians) / 2],
+		samples_ns = medians,
+		process_medians_ns = medians,
+	}
+}
+
+// Both processes are about 5% slower and every ratio is above the 2% threshold, but 2 against
+// 2 can't decide anything.
+@(test)
+test_two_processes_a_side_decide_nothing :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	diff := obench.compare_baseline(_process_stats({105, 106}), _process_stats({100, 101}), 2.0)
+	testing.expect(t, diff.too_few_samples)
+	testing.expect(t, diff.shift_low_pct > 2.0, "the smallest ratio is above the threshold")
+	testing.expect(t, !diff.is_regression && !diff.is_improvement && !diff.is_significant)
+
+	diff = obench.compare_baseline(
+		_process_stats({110, 111, 112, 113}),
+		_process_stats({100, 101, 102, 103}),
+		2.0,
+	)
+	testing.expect(t, !diff.too_few_samples)
+	testing.expect(t, diff.is_regression)
+}
