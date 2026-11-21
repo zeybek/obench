@@ -22,6 +22,7 @@ _export_doc :: proc() -> obench.Export_Document {
 		p50_ns             = 10,
 		p99_ns             = 12,
 		ci95_ns            = 0.5,
+		mb_per_sec         = 2,
 		allocs_per_op      = 1,
 		alloc_bytes_per_op = 64,
 		temp_allocs_per_op = 1,
@@ -92,6 +93,8 @@ test_export_gab_gbench_and_jsonl_parse :: proc(t: ^testing.T) {
 	testing.expect_value(t, first["real_time"].(json.Float), 10)
 	testing.expect_value(t, first["time_unit"].(json.String), "ns")
 	testing.expect_value(t, first["iterations"].(json.Float), 1000)
+	// 2 MiB/s, in bytes.
+	testing.expect_value(t, first["bytes_per_second"].(json.Float), 2 * 1024 * 1024)
 
 	lines := strings.split_lines(
 		strings.trim_space(_export_string(t, .JSONL)),

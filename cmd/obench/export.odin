@@ -250,7 +250,7 @@ write_export :: proc(
 					cpu_time = e.p50_ns,
 					time_unit = "ns",
 					items_per_second = e.items_per_sec,
-					bytes_per_second = e.mb_per_sec * 1e6,
+					bytes_per_second = e.mb_per_sec * 1024 * 1024,
 				},
 			)
 		}
