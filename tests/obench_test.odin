@@ -351,6 +351,29 @@ test_bigo_names_a_lower_class_that_fits_too :: proc(t: ^testing.T) {
 	}
 }
 
+// On a clock that ticks more coarsely than one window, a block's mean depends on how many
+// ticks land inside its windows. The lowest of several blocks is the one that caught the
+// fewest, at times none, so the calibration takes their median.
+@(test)
+test_clock_calibration_does_not_lean_low :: proc(t: ^testing.T) {
+	COUNT :: 300
+	values := make([]f64, COUNT, context.temp_allocator)
+	defer free_all(context.temp_allocator)
+	for &v in values {
+		v = obench.clock_calibrate().overhead_ns
+	}
+	slice.sort(values)
+	median := values[COUNT / 2]
+	testing.expectf(
+		t,
+		values[0] >= median / 2,
+		"the lowest of %d calibrations is %v ns and their median %v ns",
+		COUNT,
+		values[0],
+		median,
+	)
+}
+
 @(test)
 test_clock_overhead_is_measured :: proc(t: ^testing.T) {
 	// Two clock reads always cost something, even when the clock ticks too coarsely to

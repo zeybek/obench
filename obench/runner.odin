@@ -256,6 +256,15 @@ _execute_entry :: proc(
 		}
 	}
 
+	// The clock overhead is subtracted once per timed window, so it has to be what a window
+	// costs where and when this benchmark runs: after its warmup, on the core it has settled
+	// on. What `suite_create` measured as the process started can be off either way. A caller
+	// that set `Suite.clock` itself keeps its value.
+	if s.clock == s._measured_clock {
+		s.clock = clock_calibrate()
+		s._measured_clock = s.clock
+	}
+
 	// 2. Auto-calibrate batch_size so each sample takes >= min_sample_time.
 	batch_size := cfg.fixed_batch_size if !cfg.test_mode else 1
 	if batch_size <= 0 {

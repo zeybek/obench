@@ -67,19 +67,20 @@ clock_elapsed :: #force_inline proc "contextless" (
 Measures the cost of a timed window (back-to-back `clock_now()` calls) and the timer
 resolution. obench subtracts `overhead_ns` once per timed window from every sample.
 
-The overhead is the mean window over a block of windows, and the lowest mean of several
-blocks. A clock that ticks more coarsely than one window (24 MHz on Apple Silicon) reads
-most single windows as 0, but the mean over many windows still converges to the true cost.
-Taking the lowest block drops blocks hit by an interrupt.
+The overhead is the mean window over a block of windows, and the median of the means of
+several blocks. A clock that ticks more coarsely than one window (24 MHz on Apple Silicon)
+reads most single windows as 0, but the mean over many windows still converges to the true
+cost. The median drops the blocks an interrupt hit, and unlike the lowest block it doesn't
+lean low: on such a clock a block's mean depends on how many ticks land inside its windows,
+and the lowest of 16 blocks is the one that caught the fewest, at times none.
 */
 @(require_results)
 clock_calibrate :: proc "contextless" () -> Clock_Calibration {
 	BLOCKS :: 16
 	WINDOWS_PER_BLOCK :: 256
-	best_ns := max(f64)
-	best_cycles := max(f64)
+	ns_means, cycle_means: [BLOCKS]f64
 
-	for _ in 0 ..< BLOCKS {
+	for block in 0 ..< BLOCKS {
 		sum_ns: i64 = 0
 		sum_cycles: u64 = 0
 		for _ in 0 ..< WINDOWS_PER_BLOCK {
@@ -90,9 +91,20 @@ clock_calibrate :: proc "contextless" () -> Clock_Calibration {
 			sum_ns += ns
 			sum_cycles += cyc
 		}
-		best_ns = min(best_ns, f64(sum_ns) / WINDOWS_PER_BLOCK)
-		best_cycles = min(best_cycles, f64(sum_cycles) / WINDOWS_PER_BLOCK)
+		ns_means[block] = f64(sum_ns) / WINDOWS_PER_BLOCK
+		cycle_means[block] = f64(sum_cycles) / WINDOWS_PER_BLOCK
 	}
+	// Insertion sort: this procedure has no context for `slice.sort`.
+	median :: proc "contextless" (values: ^[BLOCKS]f64) -> f64 {
+		for i in 1 ..< BLOCKS {
+			for j := i; j > 0 && values[j - 1] > values[j]; j -= 1 {
+				values[j - 1], values[j] = values[j], values[j - 1]
+			}
+		}
+		return (values[BLOCKS / 2 - 1] + values[BLOCKS / 2]) / 2
+	}
+	best_ns := median(&ns_means)
+	best_cycles := median(&cycle_means)
 
 	// Resolution: the smallest non-zero step of the monotonic clock.
 	min_step: i64 = max(i64)
