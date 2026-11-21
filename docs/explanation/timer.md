@@ -14,7 +14,7 @@ The last two usually come from calling `pause` and `resume` around work that is 
 
 ## The empty loop
 
-After the benchmarks, obench times an empty `for obench.step(b) {}` loop and shows it in the header, like `empty loop 700.5 ps` on an M2. A single-threaded benchmark whose median is within 1.2 times of it gets `[near empty loop]`: there is hardly anything left of it, so the compiler most likely removed the work. Pass its input and its result through `black_box`. The report keeps the empty loop as `clock.empty_loop_ns`.
+After the benchmarks, obench times an empty `for obench.step(b) {}` loop, and the same loop with a `black_box` in its body, and shows the faster of the two in the header, like `empty loop 451.0 ps` on an M2. It times both because the empty one isn't always the fastest a `step` loop goes: on an M2 it takes about 0.7 ns per iteration and the one with the `black_box` about 0.46 ns. A single-threaded benchmark whose median is within 1.2 times of it gets `[near empty loop]`: there is hardly anything left of it, so the compiler most likely removed the work. Pass its input and its result through `black_box`. The report keeps the empty loop as `clock.empty_loop_ns`.
 
 ## The machine
 

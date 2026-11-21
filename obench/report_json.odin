@@ -164,8 +164,8 @@ Export_Run_Config :: struct {
 }
 
 /*
-The clock calibration a run subtracted from its samples, and the time per iteration of an
-empty `step` loop (`Suite.empty_loop_ns`).
+The clock calibration a run subtracted from its samples, and the time per iteration of the
+`step` loop itself (`Suite.empty_loop_ns`).
 */
 Export_Clock :: struct {
 	overhead_ns:     f64 `json:"overhead_ns"`,
