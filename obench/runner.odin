@@ -1049,6 +1049,9 @@ _time_empty_loop :: proc(s: ^Suite, temp_arena: ^runtime.Arena) -> f64 {
 	s.config.sample_count = min(s.config.sample_count, 20)
 	s.config.warmup_time = min(s.config.warmup_time, 10 * time.Millisecond)
 	s.config.enforce_zero_allocs = false
+	// `fixed_batch_size` is for the benchmarks: a small one would leave the loop a tick or two
+	// of the clock per sample.
+	s.config.fixed_batch_size = 0
 
 	no_baseline: map[string]Stats
 	no_trace: Spall_Recorder
