@@ -16,6 +16,10 @@ Run 4 or more processes on both sides: `--count 4` or more, and at least 4 round
 
 Nothing was removed or renamed in this release. If your code calls something outside the list, it keeps working, but a later release can change it without the deprecation step. The release notes will say when one does.
 
+### `--instructions` refuses the flags it ignored
+
+`--instructions` runs every benchmark alone under Cachegrind and only counts instructions. It used to accept `--fail-on-alloc-regression`, `--zero-alloc`, `--test`, `--md`, `--csv`, `--html`, and `--spall` and do nothing with them, so a job could look like it gated on allocations when it didn't (#102). These are usage errors now, with exit status 2. Take them off the `--instructions` command, and run the allocation gate, the `@zero_alloc` checks, and the other reports in a normal run next to it.
+
 ## 0.3 to 0.4
 
 ### A regression needs its whole interval above the threshold

@@ -15,6 +15,53 @@ test_parse_cli_args_instructions :: proc(t: ^testing.T) {
 	testing.expect(t, opts.fail_on_regression)
 }
 
+// `--instructions` runs every benchmark alone under Cachegrind and nothing else, so the flags
+// it couldn't honor are usage errors and not silently ignored.
+@(test)
+test_instructions_refuses_the_flags_it_cant_honor :: proc(t: ^testing.T) {
+	refused := [][]string {
+		{"--fail-on-alloc-regression"},
+		{"--zero-alloc"},
+		{"--test"},
+		{"--md", "r.md"},
+		{"--csv", "r.csv"},
+		{"--html", "r.html"},
+		{"--spall", "r.spall"},
+	}
+	for flags in refused {
+		args := make([dynamic]string, context.temp_allocator)
+		append(&args, "examples", "--instructions")
+		append(&args, ..flags)
+		opts, err := parse_cli_args(args[:])
+		defer destroy_cli_options(&opts)
+		testing.expectf(t, err != "", "%v: expected a usage error", flags)
+	}
+	free_all(context.temp_allocator)
+
+	// What it does use still parses.
+	opts, err := parse_cli_args(
+		{
+			"examples",
+			"--instructions",
+			"-f",
+			"sort",
+			"--batch-size",
+			"50",
+			"--baseline",
+			"b.json",
+			"--save-baseline",
+			"n.json",
+			"--json",
+			"r.json",
+			"--threshold",
+			"1",
+			"--fail-on-regression",
+		},
+	)
+	defer destroy_cli_options(&opts)
+	testing.expect_value(t, err, "")
+}
+
 @(test)
 test_an_instruction_baseline_that_cant_be_read_fails :: proc(t: ^testing.T) {
 	dir :: ".obench_test_instruction_baselines"
