@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.5.0](https://github.com/zeybek/obench/compare/v0.4.0...v0.5.0) (2026-11-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* refuse the flags --instructions can't honor ([#116](https://github.com/zeybek/obench/issues/116))
+* name the stable part of the package in STABILITY.md ([#118](https://github.com/zeybek/obench/issues/118))
+* decide nothing when a side has too few processes for a 95% interval ([#111](https://github.com/zeybek/obench/issues/111))
+
+### Features
+
+* warn when only one side of a comparison comes from several processes ([#117](https://github.com/zeybek/obench/issues/117)) ([7f4fed4](https://github.com/zeybek/obench/commit/7f4fed47451b07046b1749f7aaddaafa17bd02db))
+
+
+### Bug Fixes
+
+* calibrate the clock after each warmup, with the median of the block means ([#114](https://github.com/zeybek/obench/issues/114)) ([9c56e67](https://github.com/zeybek/obench/commit/9c56e679b554f78cdc4c74a785fe0fec6ee91ef3))
+* calibrate the empty loop whatever --batch-size says ([#113](https://github.com/zeybek/obench/issues/113)) ([3680363](https://github.com/zeybek/obench/commit/36803639742b25b810094cd9544b8177037dde2a))
+* decide nothing when a side has too few processes for a 95% interval ([#111](https://github.com/zeybek/obench/issues/111)) ([7b853b4](https://github.com/zeybek/obench/commit/7b853b43c4671d285836d7904aa5afba303fca9c))
+* keep the process medians of a loaded baseline in the caller's allocator ([#108](https://github.com/zeybek/obench/issues/108)) ([ebd7395](https://github.com/zeybek/obench/commit/ebd7395f61d0e86f46b2baae40bb7fe52901180a))
+* leave samples_batch_ns out of a combined report when its processes used different batch sizes ([#109](https://github.com/zeybek/obench/issues/109)) ([9355447](https://github.com/zeybek/obench/commit/93554471e8ae8d3905dc2354fd1bd29e162cf787))
+* name a lower Big-O class that fits the same points ([#110](https://github.com/zeybek/obench/issues/110)) ([a7204d2](https://github.com/zeybek/obench/commit/a7204d213dd6769bede2b99e137e32ef77e328ed))
+* refuse the flags --instructions can't honor ([#116](https://github.com/zeybek/obench/issues/116)) ([9b7d81b](https://github.com/zeybek/obench/commit/9b7d81b8f0d8de9395e05392a680a1a884d42c13))
+* take the faster of two loops as the empty-loop floor ([#115](https://github.com/zeybek/obench/issues/115)) ([6e571eb](https://github.com/zeybek/obench/commit/6e571ebc7c5ec1bf6d7b1efa95c0e9a6e350cf0a))
+* write bytes_per_second in bytes in the gbench export ([#106](https://github.com/zeybek/obench/issues/106)) ([dbcfbc0](https://github.com/zeybek/obench/commit/dbcfbc0371657cb433526d98e528990f61e725a5))
+
+
+### Documentation
+
+* name the stable part of the package in STABILITY.md ([#118](https://github.com/zeybek/obench/issues/118)) ([b834202](https://github.com/zeybek/obench/commit/b834202a8aaa698131982f4bd01cef9637b351bd))
+
 ## [0.4.0](https://github.com/zeybek/obench/compare/v0.3.0...v0.4.0) (2026-11-20)
 
 
